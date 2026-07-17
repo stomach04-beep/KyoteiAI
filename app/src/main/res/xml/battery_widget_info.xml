@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  バッテリーウィジェットの定義（AppWidgetProviderInfo）
+
+  - minWidth/minHeight: 4列x1行（250dp x 40dp）
+  - updatePeriodMillis: 1800000 (30分) ※OS最小値は30分。これより短くしてもOS判断で30分以上にされる
+  - resizeMode: horizontal|vertical （ユーザーがホーム画面でリサイズ可能）
+  - widgetCategory: home_screen のみ（ロック画面は非対応）
+  - initialLayout: 配置直後の初期表示レイアウト
+  - previewLayout は指定しない（教訓：付けない方針）
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="40dp"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_battery"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen" />

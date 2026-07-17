@@ -1,0 +1,345 @@
+package com.example.kyoteiai
+
+import android.content.Context
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import androidx.work.workDataOf
+import com.example.kyoteiai.data.EvPolicy
+import com.example.kyoteiai.data.FeedRepository
+import com.example.kyoteiai.data.OddsLogStore
+import com.example.kyoteiai.data.OddsRepository
+import com.example.kyoteiai.data.PendingCandidateStore
+import com.example.kyoteiai.data.PickLogRepository
+import com.example.kyoteiai.data.PickRecord
+import com.example.kyoteiai.data.TimeUtil
+import kotlinx.coroutines.delay
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.concurrent.TimeUnit
+
+/**
+ * EV狙い目（◎1点）通知ワーカー。検討書「購入方針とアプリ仕様」第3部(A)の実装。
+ *
+ * 【動作】15分周期の PeriodicWork。役割は「収集」と「通知」の2つで、独立にON/OFFできる。
+ *
+ *  ＜収集（KEY_ODDS_COLLECT_ENABLED・既定ON）＞
+ *   1. 締切が「今から0〜18分以内」のレースを対象にする
+ *   2. 各レースについて OddsSnapshotWorker を「締切3分前ちょうど」に予約する
+ *      （ここでは公式サイトを叩かない＝この Worker は予約係）
+ *   3. 実際の取得と odds_log.json への保存は OddsSnapshotWorker が行う
+ *   → 締切前オッズはその場で取らないと永久に失われるため、通知とは切り離して常時動かす
+ *
+ *  ＜通知（KEY_EV_NOTIFY_ENABLED・既定ON）＞
+ *   1. 対象レースの単勝オッズを公式から取得（逐次・0.8秒間隔の礼儀取得）
+ *   2. その場のオッズでEVを計算し、C'条件（EvPolicy: EV≥1.2かつ確率≥0.2のEV最大1点）が
+ *      成立したレースだけ通知する
+ *   3. C'成立レースは picks.json に記録（C'仮想収支の材料）
+ *   → 通知OFFなら、この経路では公式サイトを一切叩かない
+ *
+ * 【ガード】
+ *  - 同一レースは1日1回しか処理しない（チェック済み集合）
+ *  - 通知は1日15件まで
+ *  - 8時前・21時以降は動かない（発売時間外にサイトを叩かない）
+ *  - フィードが今日の日付でなければ何もしない（古い予想で誤通知しない）
+ */
+class EvPickWorker(
+    appContext: Context,
+    params: WorkerParameters
+) : CoroutineWorker(appContext, params) {
+
+    companion object {
+        // HotRaceWorker と同じ SharedPreferences を共用する
+        const val KEY_EV_NOTIFY_ENABLED = "ev_notify_enabled"   // 通知ON/OFF（既定ON）
+
+        // オッズ収集のON/OFF（既定ON）。通知とは独立させてある。
+        //  以前は「通知OFF＝オッズ取得もしない」だったため、通知を切ると収集まで止まり、
+        //  検証用のデータが黙って貯まらなくなっていた（2026-07-14 19:08以降に実際に発生）。
+        //  締切前オッズはその場で record しないと永久に失われるので、通知とは切り離す。
+        const val KEY_ODDS_COLLECT_ENABLED = "odds_collect_enabled"
+        private const val KEY_CHECKED_SET = "ev_checked_set"    // 処理済みレースキー集合
+        private const val KEY_CHECKED_DATE = "ev_checked_date"  // 集合をリセットした日付
+        private const val KEY_NOTIFY_COUNT = "ev_notify_count"  // 当日の通知数
+
+        private const val NOTIFY_WINDOW_MIN = 18L   // 締切の何分前から対象にするか
+        private const val DAILY_NOTIFY_CAP = 15     // 1日の通知上限
+        private const val QUIET_START_HOUR = 21     // この時刻以降は動かない
+        private const val QUIET_END_HOUR = 8        // この時刻より前は動かない
+        private const val FETCH_GAP_MS = 800L       // レース間の取得間隔（礼儀）
+
+        // 最終確認（2段階目）を締切の何分前に走らせるか。
+        // 早い時間帯のオッズは投票が薄く「幻の高EV」が出やすい（実例: 締切4分前12.9倍→確定2.1倍）。
+        // 3分前なら実購入オッズにかなり近く、テレボートで買う時間も残る
+        const val FINAL_CONFIRM_LEAD_MIN = 3L
+
+        /** レースキーから通知IDを作る（候補→確定/見送りで同じIDを使い上書き更新する） */
+        fun notifyId(key: String): Int = ("ev_$key").hashCode()
+    }
+
+    override suspend fun doWork(): Result {
+        val prefs = applicationContext.getSharedPreferences(
+            HotRaceWorker.PREFS_NAME, Context.MODE_PRIVATE
+        )
+
+        // 通知と収集は独立。両方OFFのときだけ何もしない
+        val notifyEnabled = prefs.getBoolean(KEY_EV_NOTIFY_ENABLED, true)
+        val collectEnabled = prefs.getBoolean(KEY_ODDS_COLLECT_ENABLED, true)
+        if (!notifyEnabled && !collectEnabled) return Result.success()
+
+        // ── 取りこぼし回収スイープ（ネットワーク不要・発売時間外でも実施）───────────
+        //  候補通知を出したのに、締切3分前の再判定（EvFinalCheckWorker）が
+        //  動かなかった／締切後にずれたレースを、締切超過を根拠に見送りで閉じる。
+        //  これで「候補だけ来て確定も見送りも来ない」宙ぶらりんを必ず解消する。
+        sweepStalePendingCandidates()
+
+        // 発売時間外（深夜・早朝・21時以降）はサイトを叩かない
+        val hour = LocalDateTime.now().hour
+        if (hour < QUIET_END_HOUR || hour >= QUIET_START_HOUR) return Result.success()
+
+        // 日付が変わっていたら処理済み集合と通知カウントをリセット
+        val today = LocalDate.now().toString()
+        if (prefs.getString(KEY_CHECKED_DATE, null) != today) {
+            prefs.edit()
+                .putStringSet(KEY_CHECKED_SET, emptySet())
+                .putInt(KEY_NOTIFY_COUNT, 0)
+                .putString(KEY_CHECKED_DATE, today)
+                .apply()
+        }
+
+        // フィード取得（失敗時はassetsフォールバック。取れなければ今回はスキップ）
+        val loadResult = FeedRepository.load(applicationContext)
+        val feed = loadResult.feed
+
+        // 健全性チェック: 「今日の予想をリモートから取得できたか」を記録する。
+        // 取得失敗で静かに success 終了すると障害に誰も気づけないため、
+        // 2日連続で失敗したら FeedHealthMonitor が警告通知を出す（成功で即リセット）
+        if (feed != null && loadResult.fromRemote && feed.date == today) {
+            FeedHealthMonitor.recordSuccess(applicationContext)
+        } else {
+            FeedHealthMonitor.recordFailure(applicationContext)
+        }
+        if (feed == null) return Result.success()
+        // 古いフィード（昨日以前）の予想で誤通知しない
+        if (feed.date != today) return Result.success()
+        val dateYmd = feed.date.filter { it.isDigit() }
+
+        val checked = prefs.getStringSet(KEY_CHECKED_SET, emptySet())!!.toMutableSet()
+        var notifyCount = prefs.getInt(KEY_NOTIFY_COUNT, 0)
+        val now = System.currentTimeMillis()
+
+        // 締切が0〜18分以内で、まだ処理していないレースを対象にする
+        val targets = feed.races.filter { race ->
+            val minutes = TimeUtil.minutesUntilDeadline(race.deadline, now)
+            minutes != null && minutes in 0..NOTIFY_WINDOW_MIN &&
+                !checked.contains(HotRaceWorker.raceKey(race.stadium, race.raceNo))
+        }
+        if (targets.isEmpty()) return Result.success()
+
+        var changed = false
+        var fetchedCount = 0
+        for (race in targets) {
+            val key = HotRaceWorker.raceKey(race.stadium, race.raceNo)
+            // 成否に関わらず処理済みにする（15分後の次回実行では締切超過のため再挑戦の意味がない）
+            checked.add(key)
+            changed = true
+
+            val minutesNow = TimeUtil.minutesUntilDeadline(race.deadline, System.currentTimeMillis())
+                ?: continue
+
+            // ── 収集: 締切3分前ちょうどに取りに行く予約（C'かどうかに関係なく全レース）──
+            //  ここでは公式サイトを叩かない。15分周期のこの実行は「予約係」に徹する。
+            //  締切に近いほど確定オッズに近い＝実戦で買える現実の値になるため、
+            //  「見つけた時点(0〜18分前のどこか)」ではなく3分前に寄せる。
+            //  ただし通知ONで直後に取得する分は、その結果を使い回すので予約しない（二重取得の回避）。
+            val willFetchNowForNotify = notifyEnabled && minutesNow <= FINAL_CONFIRM_LEAD_MIN + 1
+            if (collectEnabled && !willFetchNowForNotify) {
+                scheduleOddsSnapshot(race.stadium, race.raceNo, minutesNow)
+            }
+
+            // ここから下は通知のための処理。通知OFFなら公式サイトを叩かない
+            if (!notifyEnabled) continue
+
+            if (fetchedCount > 0) delay(FETCH_GAP_MS)  // レース間は礼儀正しい間隔を空ける
+            fetchedCount++
+
+            // 単勝オッズのみ取得（3連単ページは叩かない＝負荷半減）
+            val winOdds = OddsRepository.fetchWinOddsOnly(race.stadium, race.raceNo, dateYmd)
+                ?: continue  // 未発売・圏外などは黙ってスキップ（fallback通知は出さない）
+
+            // 直前に取れたオッズは収集ログにも残す（この取得を予約の代わりに使う）
+            if (collectEnabled && willFetchNowForNotify) {
+                OddsLogStore.recordRace(
+                    context = applicationContext,
+                    date = feed.date,
+                    race = race,
+                    winOdds = winOdds,
+                    minsToDeadline = minutesNow.toInt(),
+                    observedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+                )
+            }
+
+            // C'判定（しきい値はEvPolicyの単一定義を参照）
+            val probByLane = race.boats.associate { it.lane to it.prob }
+            val pick = EvPolicy.findTopPick(probByLane, winOdds) ?: continue
+
+            val minutes = TimeUtil.minutesUntilDeadline(race.deadline, System.currentTimeMillis()) ?: 0
+            // ※文字列テンプレートに%記号（確率51%等）が含まれるため、String.format は使わず
+            //   数値だけ個別に整形してから埋め込む（%が書式指定と誤解釈されて落ちるのを防ぐ）
+            val evText = "%.2f".format(pick.ev)
+            val oddsText = "%.1f".format(pick.odds)
+
+            if (minutes <= FINAL_CONFIRM_LEAD_MIN + 1) {
+                // ── 締切まで4分以内: この場で「確定」判定 ──────────────
+                //  オッズはほぼ実購入時の値。記録（C'仮想収支の材料）もここで行う
+                PickLogRepository.addIfAbsent(
+                    applicationContext,
+                    PickRecord(
+                        date = feed.date,
+                        stadium = race.stadium,
+                        stadiumName = race.stadiumName,
+                        raceNo = race.raceNo,
+                        lane = pick.lane,
+                        prob = pick.prob,
+                        odds = pick.odds,
+                        ev = pick.ev,
+                        observedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+                    )
+                )
+                if (notifyCount < DAILY_NOTIFY_CAP) {
+                    NotificationHelper.sendEvPickNotification(
+                        applicationContext, notifyId(key),
+                        "${race.stadiumName}${race.raceNo}R ◎${pick.lane}号艇 確定 EV$evText",
+                        "確率${(pick.prob * 100).toInt()}% × オッズ$oddsText / 締切${race.deadline}まで約${minutes}分\n" +
+                            "直前オッズでC'成立。買うなら今（単勝1点・手動）。",
+                        voteUrl = OddsRepository.raceVoteUrl(race.stadium, race.raceNo, dateYmd),
+                        clipText = "${race.stadiumName}${race.raceNo}R 単勝${pick.lane}号艇 ¥${EvPolicy.DEFAULT_BET_AMOUNT}",
+                        stadium = race.stadium,
+                        raceNo = race.raceNo
+                    )
+                    notifyCount++
+                }
+            } else {
+                // ── まだ早い: 「候補」通知＋締切3分前の自動再判定を予約 ──────
+                //  早い時間帯のオッズは薄く幻の高EVが出やすいので、記録はまだしない。
+                //  再判定の結果は同じ通知IDで「◎確定」または「見送りへ変更」に上書きされる
+                if (notifyCount < DAILY_NOTIFY_CAP) {
+                    NotificationHelper.sendEvPickNotification(
+                        applicationContext, notifyId(key),
+                        "${race.stadiumName}${race.raceNo}R ◎${pick.lane}号艇 候補 EV$evText",
+                        "確率${(pick.prob * 100).toInt()}% × オッズ$oddsText（暫定・締切${race.deadline}）\n" +
+                            "締切${FINAL_CONFIRM_LEAD_MIN}分前に最新オッズで自動再判定→この通知を更新します。" +
+                            "更新が来なければ買う前にアプリでオッズ再確認を。",
+                        voteUrl = OddsRepository.raceVoteUrl(race.stadium, race.raceNo, dateYmd),
+                        clipText = "${race.stadiumName}${race.raceNo}R 単勝${pick.lane}号艇 ¥${EvPolicy.DEFAULT_BET_AMOUNT}",
+                        stadium = race.stadium,
+                        raceNo = race.raceNo
+                    )
+                    notifyCount++
+                    // 候補を控える。締切3分前の再判定が決着させれば削除される。
+                    // 決着しないまま締切を過ぎたら上のスイープが見送りで閉じる。
+                    PendingCandidateStore.add(
+                        applicationContext,
+                        PendingCandidateStore.Pending(
+                            key = key,
+                            date = feed.date,
+                            deadline = race.deadline,
+                            stadium = race.stadium,
+                            raceNo = race.raceNo,
+                            lane = pick.lane,
+                            stadiumName = race.stadiumName
+                        )
+                    )
+                }
+                scheduleFinalCheck(key, race.stadium, race.raceNo, minutes)
+            }
+        }
+
+        if (changed) {
+            prefs.edit()
+                .putStringSet(KEY_CHECKED_SET, checked)
+                .putInt(KEY_NOTIFY_COUNT, notifyCount)
+                .apply()
+        }
+        return Result.success()
+    }
+
+    /**
+     * 候補を出したのに決着していないレースのうち、締切を過ぎたものを見送りで閉じる。
+     *
+     * 締切3分前の再判定（EvFinalCheckWorker）が正常に決着させた候補は
+     * pending から消えているので、ここに残るのは
+     *  ・最終確認Workerがそもそも動かなかった（端末の省電力・OEMのバッテリー最適化）
+     *  ・締切後にずれて通知できなかった
+     * ケースだけ。締切超過を根拠に「見送り（締切）」で必ず閉じる。
+     */
+    private fun sweepStalePendingCandidates() {
+        val today = LocalDate.now().toString()
+        val now = System.currentTimeMillis()
+        for (p in PendingCandidateStore.all(applicationContext)) {
+            // 当日でない古い候補は通知せず掃除（前日分の見送り通知を今さら出さない）
+            if (p.date != today) {
+                PendingCandidateStore.remove(applicationContext, p.key)
+                continue
+            }
+            val minutes = TimeUtil.minutesUntilDeadline(p.deadline, now)
+            // まだ締切前なら決着を待つ（最終確認Workerが動く余地がある）
+            if (minutes == null || minutes >= 0) continue
+
+            NotificationHelper.sendEvPickNotification(
+                applicationContext, notifyId(p.key),
+                "${p.stadiumName}${p.raceNo}R 見送り（締切）",
+                "◎${p.lane}号艇の候補を出した後、締切3分前の自動再判定が完了しませんでした" +
+                    "（オッズ取得失敗 or 端末の省電力）。\nこのレースは締切済みのため見送り扱いです。",
+                stadium = p.stadium,
+                raceNo = p.raceNo
+            )
+            PendingCandidateStore.remove(applicationContext, p.key)
+        }
+    }
+
+    /**
+     * 締切3分前に1回だけ動く最終確認Worker（EvFinalCheckWorker）を予約する。
+     * 同じレースに二重予約しないよう enqueueUniqueWork(KEEP) を使う。
+     */
+    private fun scheduleFinalCheck(key: String, stadium: String, raceNo: Int, minutesLeft: Long) {
+        val delayMin = (minutesLeft - FINAL_CONFIRM_LEAD_MIN).coerceAtLeast(0)
+        val request = OneTimeWorkRequestBuilder<EvFinalCheckWorker>()
+            .setInitialDelay(delayMin, TimeUnit.MINUTES)
+            .setInputData(
+                workDataOf(
+                    EvFinalCheckWorker.KEY_STADIUM to stadium,
+                    EvFinalCheckWorker.KEY_RACE_NO to raceNo
+                )
+            )
+            .build()
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            "kyotei_final_$key", ExistingWorkPolicy.KEEP, request
+        )
+    }
+
+    /**
+     * 締切直前オッズの取得を「締切3分前ちょうど」に予約する（収集用・全レース対象）。
+     *
+     * 15分周期のこの Worker で見つけた時点のオッズ（0〜18分前のどこか）ではなく、
+     * 3分前に寄せて取ることで、実際に買う瞬間に近い値を残す。
+     * 既に3分前を切って見つけたレースは delay=0 になり、すぐ取りに行く。
+     */
+    private fun scheduleOddsSnapshot(stadium: String, raceNo: Int, minutesLeft: Long) {
+        val delayMin = (minutesLeft - FINAL_CONFIRM_LEAD_MIN).coerceAtLeast(0)
+        val request = OneTimeWorkRequestBuilder<OddsSnapshotWorker>()
+            .setInitialDelay(delayMin, TimeUnit.MINUTES)
+            .setInputData(
+                workDataOf(
+                    OddsSnapshotWorker.KEY_STADIUM to stadium,
+                    OddsSnapshotWorker.KEY_RACE_NO to raceNo
+                )
+            )
+            .build()
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            OddsSnapshotWorker.workName(stadium, raceNo), ExistingWorkPolicy.KEEP, request
+        )
+    }
+}

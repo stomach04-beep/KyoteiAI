@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- インターネット接続（リモートの予想フィード取得に使用） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 通知パーミッション（Android 13以上で必要） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- バイブレーション -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 端末再起動後の自動復帰 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- WorkManager のバックグラウンド処理用 WakeLock -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 締切前の正確な時刻に通知チェックを走らせるexactアラーム（Android 12+）
+         Dozeで15分周期Workerが遅延しても通知窓（締切0〜18/30分前）を逃さないために必要 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- アプリ更新後もexactアラーム権限を維持（Android 14+。BargainChecker と同じ流儀） -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+    <application
+        android:name=".KyoteiAIApp"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="KyoteiAI"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.KyoteiAI">
+
+        <!-- launchMode=singleTop: 起動中に通知をタップしても Activity を作り直さず
+             onNewIntent でレース指定を受け取る（該当レース詳細への直行に必要） -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:label="KyoteiAI">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 通知の「投票へ」中継Activity（透明・一瞬で閉じる）。
+             買い目をクリップボードへコピーしてから該当レースの投票ページを開く。
+             Android 10+のバックグラウンドからのクリップボード書込禁止への対策 -->
+        <activity
+            android:name=".BetCopyActivity"
+            android:exported="false"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- 再起動後・APK再インストール後にアプリプロセスを復元するレシーバー -->
+        <!-- 受信するだけで KyoteiAIApp.onCreate() が呼ばれ WorkManager が再登録される -->
+        <!-- MY_PACKAGE_REPLACED は adb install -r や Play 更新後の再起動を担当（feedback_my_package_replaced） -->
+        <!-- BOOT_COMPLETED 等のシステムブロードキャスト受信には exported=true が必要
+             （false だと端末再起動後に通知ワーカーが復帰しない。feedback_receiver_exported） -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 締切約15分前のexactアラーム受信レシーバー。
+             DeadlineAlarmScheduler が登録した AlarmManager の発火を受けて、
+             HotRace/EvPick の判定を即時実行する（Dozeによる周期Worker遅延の対策）。
+             自アプリの PendingIntent からしか呼ばれないので exported=false -->
+        <receiver
+            android:name=".DeadlineAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.kyoteiai.DEADLINE_ALARM" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+</manifest>
