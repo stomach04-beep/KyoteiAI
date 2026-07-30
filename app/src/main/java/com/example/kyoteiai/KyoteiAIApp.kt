@@ -42,7 +42,11 @@ class KyoteiAIApp : Application() {
 
         // EV狙い目（◎1点）の定期チェック（15分周期）
         // 締切前オッズでC'条件（EV≥1.2・確率≥0.2）が成立したレースだけ通知する
-        val evRequest = PeriodicWorkRequestBuilder<EvPickWorker>(15, TimeUnit.MINUTES)
+        // 周期は EvPickWorker.WORK_PERIOD_MIN を唯一の定義とする（取得失敗時の
+        // 「次回でも間に合うか」判定が同じ値を見るため、二重定義するとズレる）
+        val evRequest = PeriodicWorkRequestBuilder<EvPickWorker>(
+            EvPickWorker.WORK_PERIOD_MIN, TimeUnit.MINUTES
+        )
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "kyotei_ev_pick_check",
