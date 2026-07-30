@@ -65,6 +65,9 @@ class EvPickWorker(
         private const val KEY_NOTIFY_COUNT = "ev_notify_count"  // 当日の通知数
 
         private const val NOTIFY_WINDOW_MIN = 18L   // 締切の何分前から対象にするか
+        // このWorkerの実行周期（KyoteiAIApp の PeriodicWorkRequest と必ず揃える）。
+        // 取得失敗時に「次回実行でも間に合うか」を判断するのに使う。
+        const val WORK_PERIOD_MIN = 15L
         private const val DAILY_NOTIFY_CAP = 15     // 1日の通知上限
         private const val QUIET_START_HOUR = 21     // この時刻以降は動かない
         private const val QUIET_END_HOUR = 8        // この時刻より前は動かない
@@ -167,7 +170,17 @@ class EvPickWorker(
 
             // 単勝オッズのみ取得（3連単ページは叩かない＝負荷半減）
             val winOdds = OddsRepository.fetchWinOddsOnly(race.stadium, race.raceNo, dateYmd)
-                ?: continue  // 未発売・圏外などは黙ってスキップ（fallback通知は出さない）
+            if (winOdds == null) {
+                // 未発売・圏外などは fallback通知を出さない方針は維持する。
+                // ただし「処理済み」を取り消せる場合は取り消す：この実行は15分周期なので、
+                // 締切まで15分以上あるレースは次回もまだ間に合う。取り消さないと、
+                // 一度の通信失敗でそのレースの判定機会が永久に失われる（候補も見送りも
+                // 何も通知されない）。締切が近すぎる場合は従来どおり処理済みのままにする。
+                if (minutesNow > WORK_PERIOD_MIN) {
+                    checked.remove(key)
+                }
+                continue
+            }
 
             // 直前に取れたオッズは収集ログにも残す（この取得を予約の代わりに使う）
             if (collectEnabled && willFetchNowForNotify) {

@@ -40,6 +40,10 @@ if %ERRORLEVEL% NEQ 0 (
     if not defined AUTO_BUILD pause
     exit /b 1
 )
+echo.
+REM Verify the app does not collide with the status bar / navigation bar.
+call "C:\Users\81905\AndroidStudioProjects\check_bar_overlap.bat" "%~dp0."
+
 
 echo.
 echo =====================================

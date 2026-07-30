@@ -139,6 +139,21 @@ fun TodayScreen(
             }
             // 一覧表示
             else -> {
+                // 取得に失敗すると assets のサンプル(2026-07-08固定)にフォールバックする。
+                // サンプルも正常にパースされて feed != null になるため、以前は17日前の
+                // 固定データが「本日のレース」として無警告で表示されていた。
+                // 締切判定は時刻しか見ない（日付を見ない）ので見た目では気づけない。
+                // 自動通知側は feed.date != today で弾いているが、手動で開くこの画面だけが
+                // 素通りしていたため、日付が今日でなければ必ず警告を出す。
+                if (state.feed.date != java.time.LocalDate.now().toString()) {
+                    Text(
+                        text = "⚠ 表示中のデータは ${state.feed.date} 付です（最新を取得できていません）。" +
+                            "本日のレースではないため、締切表示も当てになりません。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
                 // C'成立があるときだけ凡例を出す（普段は場所を取らない）
                 if (cprimeKeys.isNotEmpty()) {
                     Text(
