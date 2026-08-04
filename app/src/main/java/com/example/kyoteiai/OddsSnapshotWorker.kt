@@ -7,6 +7,7 @@ import androidx.work.WorkerParameters
 import com.example.kyoteiai.data.FeedRepository
 import com.example.kyoteiai.data.OddsLogStore
 import com.example.kyoteiai.data.OddsRepository
+import com.example.kyoteiai.data.RunLogStore
 import com.example.kyoteiai.data.TimeUtil
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -62,6 +63,7 @@ class OddsSnapshotWorker(
         )
         if (!prefs.getBoolean(EvPickWorker.KEY_ODDS_COLLECT_ENABLED, true)) {
             Log.i(TAG, "$stadium/${raceNo}R 収集OFFのためスキップ")
+            RunLogStore.noteSnapshot(applicationContext, RunLogStore.Snap.SKIP, "収集OFF")
             return Result.success()
         }
 
@@ -71,10 +73,14 @@ class OddsSnapshotWorker(
         val feed = FeedRepository.load(applicationContext).feed
         if (feed == null) {
             Log.w(TAG, "$stadium/${raceNo}R フィード取得失敗のため中止")
+            RunLogStore.noteSnapshot(applicationContext, RunLogStore.Snap.FAIL, "フィード取得失敗")
             return Result.success()
         }
         if (feed.date != LocalDate.now().toString()) {
             Log.i(TAG, "$stadium/${raceNo}R フィードが今日でない(${feed.date})ため中止")
+            RunLogStore.noteSnapshot(
+                applicationContext, RunLogStore.Snap.SKIP, "フィードが今日でない(${feed.date})"
+            )
             return Result.success()
         }
         val race = feed.races.firstOrNull {
@@ -82,6 +88,7 @@ class OddsSnapshotWorker(
         }
         if (race == null) {
             Log.w(TAG, "$stadium/${raceNo}R フィード内にレースが見つからない")
+            RunLogStore.noteSnapshot(applicationContext, RunLogStore.Snap.SKIP, "フィードにレース不在")
             return Result.success()
         }
 
@@ -90,13 +97,22 @@ class OddsSnapshotWorker(
         // 既に記録済みなら公式サイトを叩かない（通知経路が直前に取得済みの場合など）
         if (OddsLogStore.hasRace(applicationContext, feed.date, stadium, raceNo)) {
             Log.i(TAG, "$who 記録済みのためスキップ")
+            RunLogStore.noteSnapshot(applicationContext, RunLogStore.Snap.SKIP, "記録済み")
             return Result.success()
         }
 
         // 締切超過チェック（上のコメントの理由で、過ぎていたら何もしない）
-        val mins = TimeUtil.minutesUntilDeadline(race.deadline) ?: return Result.success()
+        val mins = TimeUtil.minutesUntilDeadline(race.deadline)
+        if (mins == null) {
+            RunLogStore.noteSnapshot(applicationContext, RunLogStore.Snap.SKIP, "締切時刻を解釈できず")
+            return Result.success()
+        }
         if (mins < 0) {
             Log.i(TAG, "$who 締切超過(${mins}分)のため記録しない＝発火が遅れた")
+            // 締切超過＝ジョブの発火が遅れた証拠。省電力による遅延はここに現れる
+            RunLogStore.noteSnapshot(
+                applicationContext, RunLogStore.Snap.LATE, "$who 締切超過${mins}分＝発火遅れ"
+            )
             return Result.success()
         }
 
@@ -109,6 +125,12 @@ class OddsSnapshotWorker(
             val willRetry = runAttemptCount < MAX_ATTEMPTS && mins >= 1
             Log.i(TAG, "$who 取得失敗 ${took}秒 ${mins}分前 試行${runAttemptCount} " +
                 if (willRetry) "→再挑戦" else "→あきらめる(記録なし)")
+            // 再挑戦する分は数えない（同じレースを二重に失敗計上しないため）
+            if (!willRetry) {
+                RunLogStore.noteSnapshot(
+                    applicationContext, RunLogStore.Snap.FAIL, "$who 取得失敗(${took}秒)"
+                )
+            }
             return if (willRetry) Result.retry() else Result.success()
         }
 
@@ -121,6 +143,9 @@ class OddsSnapshotWorker(
             observedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
         )
         Log.i(TAG, "$who 記録した ${mins}分前 ${took}秒 オッズ${winOdds.size}艇")
+        RunLogStore.noteSnapshot(
+            applicationContext, RunLogStore.Snap.OK, "$who 記録${mins}分前"
+        )
         return Result.success()
     }
 }
