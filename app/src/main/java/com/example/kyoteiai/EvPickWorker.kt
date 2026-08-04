@@ -14,6 +14,7 @@ import com.example.kyoteiai.data.OddsRepository
 import com.example.kyoteiai.data.PendingCandidateStore
 import com.example.kyoteiai.data.PickLogRepository
 import com.example.kyoteiai.data.PickRecord
+import com.example.kyoteiai.data.RunLogStore
 import com.example.kyoteiai.data.TimeUtil
 import kotlinx.coroutines.delay
 import java.time.LocalDate
@@ -83,6 +84,12 @@ class EvPickWorker(
     }
 
     override suspend fun doWork(): Result {
+        // 実行の足跡を最初に残す（早期returnより前）。
+        //  2026-07-27 に収集が丸一日ゼロになったとき、「ワーカーが動かなかったのか、
+        //  動いたが何もしなかったのか」を示す記録が端末に無く原因究明ができなかった。
+        //  この1行があれば runs=0 か runs>0 かで即座に切り分けられる。
+        RunLogStore.noteRun(applicationContext, "開始")
+
         val prefs = applicationContext.getSharedPreferences(
             HotRaceWorker.PREFS_NAME, Context.MODE_PRIVATE
         )
@@ -90,7 +97,10 @@ class EvPickWorker(
         // 通知と収集は独立。両方OFFのときだけ何もしない
         val notifyEnabled = prefs.getBoolean(KEY_EV_NOTIFY_ENABLED, true)
         val collectEnabled = prefs.getBoolean(KEY_ODDS_COLLECT_ENABLED, true)
-        if (!notifyEnabled && !collectEnabled) return Result.success()
+        if (!notifyEnabled && !collectEnabled) {
+            RunLogStore.noteStage(applicationContext, "収集も通知もOFF")
+            return Result.success()
+        }
 
         // ── 取りこぼし回収スイープ（ネットワーク不要・発売時間外でも実施）───────────
         //  候補通知を出したのに、締切3分前の再判定（EvFinalCheckWorker）が
@@ -100,7 +110,10 @@ class EvPickWorker(
 
         // 発売時間外（深夜・早朝・21時以降）はサイトを叩かない
         val hour = LocalDateTime.now().hour
-        if (hour < QUIET_END_HOUR || hour >= QUIET_START_HOUR) return Result.success()
+        if (hour < QUIET_END_HOUR || hour >= QUIET_START_HOUR) {
+            RunLogStore.noteStage(applicationContext, "発売時間外(${hour}時)")
+            return Result.success()
+        }
 
         // 日付が変わっていたら処理済み集合と通知カウントをリセット
         val today = LocalDate.now().toString()
@@ -119,14 +132,23 @@ class EvPickWorker(
         // 健全性チェック: 「今日の予想をリモートから取得できたか」を記録する。
         // 取得失敗で静かに success 終了すると障害に誰も気づけないため、
         // 2日連続で失敗したら FeedHealthMonitor が警告通知を出す（成功で即リセット）
-        if (feed != null && loadResult.fromRemote && feed.date == today) {
+        val feedOk = feed != null && loadResult.fromRemote && feed.date == today
+        if (feedOk) {
             FeedHealthMonitor.recordSuccess(applicationContext)
         } else {
             FeedHealthMonitor.recordFailure(applicationContext)
         }
-        if (feed == null) return Result.success()
+        // フィードの成否も日別に残す（収集ゼロの原因が「フィードが読めない」かを切り分ける）
+        RunLogStore.noteFeed(applicationContext, feedOk, feed?.date)
+        if (feed == null) {
+            RunLogStore.noteStage(applicationContext, "フィード取得失敗")
+            return Result.success()
+        }
         // 古いフィード（昨日以前）の予想で誤通知しない
-        if (feed.date != today) return Result.success()
+        if (feed.date != today) {
+            RunLogStore.noteStage(applicationContext, "フィードが今日でない(${feed.date})")
+            return Result.success()
+        }
         val dateYmd = feed.date.filter { it.isDigit() }
 
         val checked = prefs.getStringSet(KEY_CHECKED_SET, emptySet())!!.toMutableSet()
@@ -139,7 +161,10 @@ class EvPickWorker(
             minutes != null && minutes in 0..NOTIFY_WINDOW_MIN &&
                 !checked.contains(HotRaceWorker.raceKey(race.stadium, race.raceNo))
         }
-        if (targets.isEmpty()) return Result.success()
+        if (targets.isEmpty()) {
+            RunLogStore.noteStage(applicationContext, "締切0〜18分のレースなし(全${feed.races.size}R)")
+            return Result.success()
+        }
 
         var changed = false
         var fetchedCount = 0
@@ -160,6 +185,9 @@ class EvPickWorker(
             val willFetchNowForNotify = notifyEnabled && minutesNow <= FINAL_CONFIRM_LEAD_MIN + 1
             if (collectEnabled && !willFetchNowForNotify) {
                 scheduleOddsSnapshot(race.stadium, race.raceNo, minutesNow)
+                // 「何件予約したか」を残す。予約数に対して記録数が少なければ
+                // 原因は予約側でなく取得側（OddsSnapshotWorker）だと分かる
+                RunLogStore.noteScheduled(applicationContext)
             }
 
             // ここから下は通知のための処理。通知OFFなら公式サイトを叩かない
@@ -192,6 +220,9 @@ class EvPickWorker(
                     minsToDeadline = minutesNow.toInt(),
                     observedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
                 )
+                // 通知経路が直前に取ったぶんも「記録できた1件」として数える
+                // （予約経由と足して、その日の記録総数が odds_log.json と一致する）
+                RunLogStore.noteSnapshot(applicationContext, RunLogStore.Snap.OK, "通知経路で記録")
             }
 
             // C'判定（しきい値はEvPolicyの単一定義を参照）
