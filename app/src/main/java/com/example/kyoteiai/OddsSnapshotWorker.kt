@@ -118,7 +118,11 @@ class OddsSnapshotWorker(
 
         val dateYmd = feed.date.filter { it.isDigit() }
         val t0 = System.currentTimeMillis()
-        val winOdds = OddsRepository.fetchWinOddsOnly(stadium, raceNo, dateYmd)
+        // 単勝と複勝を同時に取る（同じページなので追加のリクエストは発生しない）。
+        // 複勝は「その日に記録しないと永久に失われる」側のデータで、
+        // 複勝EVが本物かどうかはこれが貯まらないと判定できない（2026-08-06）
+        val fetched = OddsRepository.fetchWinAndPlaceOdds(stadium, raceNo, dateYmd)
+        val winOdds = fetched?.win
         val took = (System.currentTimeMillis() - t0) / 1000.0
         if (winOdds == null) {
             // 未発売・通信失敗など。締切まで余裕があるうちだけ、数十秒後に1回だけ再挑戦する
@@ -140,9 +144,11 @@ class OddsSnapshotWorker(
             race = race,
             winOdds = winOdds,
             minsToDeadline = mins.toInt(),   // 何分前に取れたか＝この記録の鮮度そのもの
-            observedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+            observedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm")),
+            placeOdds = fetched.place
         )
-        Log.i(TAG, "$who 記録した ${mins}分前 ${took}秒 オッズ${winOdds.size}艇")
+        Log.i(TAG, "$who 記録した ${mins}分前 ${took}秒 " +
+            "単勝${winOdds.size}艇 複勝${fetched.place.size}艇")
         RunLogStore.noteSnapshot(
             applicationContext, RunLogStore.Snap.OK, "$who 記録${mins}分前"
         )

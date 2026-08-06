@@ -121,6 +121,64 @@ object OddsRepository {
     }
 
     /**
+     * 単勝と複勝をまとめて返す（同じページなので**追加のリクエストは発生しない**）。
+     *
+     * 単勝ページ(oddstf)には複勝表も載っており、oddsPoint は12個並ぶ。
+     * 先頭6個が単勝、7〜12個目が複勝。これまで先頭6個だけ使い複勝を捨てていた。
+     *
+     * 【なぜ複勝も要るか】
+     *  2026-08-06 の検証で、複勝の期待値買いは確定オッズ上で回収率148%（上位10本を除いても
+     *  121%・30日中27日プラス）と出た。ただしそれは確定オッズでの上限値で、
+     *  実際に買う瞬間の締切前オッズは**その日に記録しないと永久に失われる**。
+     *  単勝で同じ形（確定136%）が実測84〜87%に落ちた前例があるため、
+     *  本当に勝てるかは締切前の複勝オッズを貯めない限り判定できない。
+     *
+     * @return 単勝と複勝。未発売・取得失敗は null
+     */
+    data class WinPlaceOdds(
+        val win: Map<Int, Double?>,
+        /** 号艇 → (複勝オッズ下限, 上限)。複勝は範囲表示なので2値で持つ。取れない艇は null */
+        val place: Map<Int, Pair<Double, Double>?>
+    )
+
+    suspend fun fetchWinAndPlaceOdds(
+        stadium: String,
+        raceNo: Int,
+        dateYmd: String
+    ): WinPlaceOdds? = withContext(Dispatchers.IO) {
+        val html = httpGet(WIN_URL.format(raceNo, stadium, dateYmd))
+            ?: return@withContext null
+        val win = parseWinOdds(html) ?: return@withContext null
+        WinPlaceOdds(win, parsePlaceOdds(html))
+    }
+
+    /**
+     * 複勝オッズを解析する（oddsPoint の7〜12個目）。
+     * 表示は「1.0-1.3」のような範囲。単値のこともあるのでその場合は下限＝上限とする。
+     * 複勝表が無い（12個に満たない）ページでも単勝は使えるので、ここでは空を返すだけにする。
+     */
+    private fun parsePlaceOdds(html: String): Map<Int, Pair<Double, Double>?> {
+        val values = ODDS_REGEX.findAll(html).map { it.groupValues[1] }.toList()
+        if (values.size < 12) {
+            Log.i(TAG, "解析: 複勝が取れない(oddsPoint${values.size}個) → 単勝のみ記録")
+            return emptyMap()
+        }
+        val map = HashMap<Int, Pair<Double, Double>?>()
+        for (lane in 1..6) {
+            val raw = values[5 + lane]          // 7個目(index6)から順に1〜6号艇
+            val parts = raw.split("-")
+            map[lane] = if (parts.size == 2) {
+                val lo = parts[0].toDoubleOrNull()
+                val hi = parts[1].toDoubleOrNull()
+                if (lo != null && hi != null) lo to hi else null
+            } else {
+                raw.toDoubleOrNull()?.let { it to it }   // 範囲でなく単値のことがある
+            }
+        }
+        return map
+    }
+
+    /**
      * 単勝オッズを解析する。
      * 正規表現マッチの先頭6個が1〜6号艇の単勝オッズ。
      * 6個未満・未発売文言があれば未発売として null を返す。
