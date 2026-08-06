@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通知（ステータスバー）用アイコン：ボート＋波（競艇）
+     対象アプリ：KyoteiAI ／ シリーズ：カラフル
+     ステータスバーはアルファ値だけを使うので白単色で描く。tint は付けない。
+     通知シェードのアクセント色は Kotlin 側で指定する:
+       .setColor(android.graphics.Color.parseColor("#00B0FF"))
+     （上端バーのアイコン自体は仕様どおり白のまま）
+     notification-icons/make_icons.py が自動生成しています。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,4.2 A2.3,2.3 0 1,0 12,8.8 A2.3,2.3 0 1,0 12,4.2 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M2.6,10.4 L21.4,10.4 L18.4,15.4 L5.6,15.4 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M2,18.6 q2.6,-2 5.2,0 q2.6,2 5.2,0 q2.6,-2 5.2,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3.6,22 q2.6,-2 5.2,0 q2.6,2 5.2,0 q2.6,-2 5.2,0" />
+</vector>
