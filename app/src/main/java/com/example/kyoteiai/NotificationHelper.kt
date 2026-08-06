@@ -116,7 +116,8 @@ object NotificationHelper {
         val manager = context.getSystemService(NotificationManager::class.java)
 
         val notification = NotificationCompat.Builder(context, HOT_RACE_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_info_details)
+            .setSmallIcon(R.drawable.ic_stat_boat)
+            .setColor(android.graphics.Color.parseColor("#00B0FF"))
             .setContentTitle(title)
             .setContentText(message)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -187,7 +188,8 @@ object NotificationHelper {
         )
 
         val notification = NotificationCompat.Builder(context, EV_PICK_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_info_details)
+            .setSmallIcon(R.drawable.ic_stat_boat)
+            .setColor(android.graphics.Color.parseColor("#00B0FF"))
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
