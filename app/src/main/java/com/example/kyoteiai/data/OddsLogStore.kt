@@ -33,7 +33,10 @@ data class OddsSnapshot(
     val observedAt: String,         // 実際に取得できた時刻 "HH:mm"
     val minsToDeadline: Int,        // 取得時点で締切まで何分だったか（＝この記録の鮮度そのもの）
     val odds: Map<Int, Double>,     // 艇番 → 単勝オッズ
-    val probs: Map<Int, Double>     // 艇番 → モデル確率（フィードの値）
+    val probs: Map<Int, Double>,    // 艇番 → モデル確率（フィードの値）
+    // 艇番 → (複勝オッズ下限, 上限)。単勝と同じページに載っているので取得は無料。
+    // 2026-08-06 以前の記録には無い（PC側は欠けていても読めるようにしてある）
+    val placeOdds: Map<Int, Pair<Double, Double>> = emptyMap()
 )
 
 object OddsLogStore {
@@ -58,12 +61,28 @@ object OddsLogStore {
                     observedAt = o.optString("observedAt"),
                     minsToDeadline = o.optInt("minsToDeadline", -1),
                     odds = readLaneMap(o.optJSONObject("odds")),
-                    probs = readLaneMap(o.optJSONObject("probs"))
+                    probs = readLaneMap(o.optJSONObject("probs")),
+                    placeOdds = readPlaceMap(o.optJSONObject("placeOdds"))
                 )
             }
         } catch (e: Exception) {
             emptyList()
         }
+    }
+
+    /**
+     * 複勝オッズ（艇番→[下限,上限]）のJSONを Map に戻す。
+     * 2026-08-06 より前の記録にはこのキーが無いので、無ければ空で返す（後方互換）。
+     */
+    private fun readPlaceMap(o: JSONObject?): Map<Int, Pair<Double, Double>> {
+        if (o == null) return emptyMap()
+        val m = mutableMapOf<Int, Pair<Double, Double>>()
+        o.keys().forEach { k ->
+            val lane = k.toIntOrNull() ?: return@forEach
+            val arr = o.optJSONArray(k) ?: return@forEach
+            if (arr.length() >= 2) m[lane] = arr.optDouble(0) to arr.optDouble(1)
+        }
+        return m
     }
 
     /** 艇番→数値 のJSONを Map に戻す */
@@ -105,6 +124,13 @@ object OddsLogStore {
                 put("minsToDeadline", r.minsToDeadline)
                 put("odds", JSONObject().apply { r.odds.forEach { (k, v) -> put(k.toString(), v) } })
                 put("probs", JSONObject().apply { r.probs.forEach { (k, v) -> put(k.toString(), v) } })
+                if (r.placeOdds.isNotEmpty()) {
+                    put("placeOdds", JSONObject().apply {
+                        r.placeOdds.forEach { (k, v) ->
+                            put(k.toString(), JSONArray().put(v.first).put(v.second))
+                        }
+                    })
+                }
             })
         }
         atomicWrite(File(context.filesDir, FILE_NAME), arr.toString())
@@ -132,11 +158,13 @@ object OddsLogStore {
         race: RacePred,
         winOdds: Map<Int, Double?>,
         minsToDeadline: Int,
-        observedAt: String
+        observedAt: String,
+        placeOdds: Map<Int, Pair<Double, Double>?> = emptyMap()
     ) {
         // 取れなかった艇（null）は捨てる。6艇そろわなくても取れた分は残す
         val oddsMap = winOdds.filterValues { it != null }.mapValues { it.value!! }
         if (oddsMap.isEmpty()) return
+        val placeMap = placeOdds.filterValues { it != null }.mapValues { it.value!! }
         addIfAbsent(
             context,
             OddsSnapshot(
@@ -148,7 +176,8 @@ object OddsLogStore {
                 observedAt = observedAt,
                 minsToDeadline = minsToDeadline,
                 odds = oddsMap,
-                probs = race.boats.associate { it.lane to it.prob }
+                probs = race.boats.associate { it.lane to it.prob },
+                placeOdds = placeMap
             )
         )
     }

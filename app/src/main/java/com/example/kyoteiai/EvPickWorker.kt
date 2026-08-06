@@ -196,8 +196,10 @@ class EvPickWorker(
             if (fetchedCount > 0) delay(FETCH_GAP_MS)  // レース間は礼儀正しい間隔を空ける
             fetchedCount++
 
-            // 単勝オッズのみ取得（3連単ページは叩かない＝負荷半減）
-            val winOdds = OddsRepository.fetchWinOddsOnly(race.stadium, race.raceNo, dateYmd)
+            // 単勝ページのみ取得（3連単ページは叩かない＝負荷半減）。
+            // 複勝は同じページに載っているので、同時に受け取って収集ログへ残す
+            val fetched = OddsRepository.fetchWinAndPlaceOdds(race.stadium, race.raceNo, dateYmd)
+            val winOdds = fetched?.win
             if (winOdds == null) {
                 // 未発売・圏外などは fallback通知を出さない方針は維持する。
                 // ただし「処理済み」を取り消せる場合は取り消す：この実行は15分周期なので、
@@ -218,7 +220,8 @@ class EvPickWorker(
                     race = race,
                     winOdds = winOdds,
                     minsToDeadline = minutesNow.toInt(),
-                    observedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+                    observedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm")),
+                    placeOdds = fetched.place
                 )
                 // 通知経路が直前に取ったぶんも「記録できた1件」として数える
                 // （予約経由と足して、その日の記録総数が odds_log.json と一致する）
