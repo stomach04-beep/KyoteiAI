@@ -15,8 +15,11 @@ android {
         applicationId = "com.example.kyoteiai"
         minSdk = 31
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1"
+        // 2026-08-12: 1.1 のまま据え置きだった間に v1.3〜v1.7 相当が入っていたので実態へ。
+        // 中身＝EV通知/購入記録/収支(v1.3)・3連単の非推奨表示(v1.4)・締切前オッズ収集をスマホへ移管(v1.5)・
+        // 収集ワーカーの実行の足跡 run_log.json・締切前の複勝オッズも記録(v1.7)・通知アイコン刷新。
+        versionCode = 3
+        versionName = "1.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
