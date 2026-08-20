@@ -164,16 +164,28 @@ object OddsRepository {
             return emptyMap()
         }
         val map = HashMap<Int, Pair<Double, Double>?>()
+        var zeroCount = 0
         for (lane in 1..6) {
             val raw = values[5 + lane]          // 7個目(index6)から順に1〜6号艇
             val parts = raw.split("-")
-            map[lane] = if (parts.size == 2) {
+            val parsed = if (parts.size == 2) {
                 val lo = parts[0].toDoubleOrNull()
                 val hi = parts[1].toDoubleOrNull()
                 if (lo != null && hi != null) lo to hi else null
             } else {
                 raw.toDoubleOrNull()?.let { it to it }   // 範囲でなく単値のことがある
             }
+            // オッズは必ず1.0以上。0や負は「発売前で未確定」を意味するので記録しない
+            // （0で保存すると検証データが汚れる。ケースバッテリー0%と同じ「0は未確定値」）
+            map[lane] = if (parsed != null && parsed.first > 0.0 && parsed.second > 0.0) {
+                parsed
+            } else {
+                if (parsed != null) zeroCount++
+                null
+            }
+        }
+        if (zeroCount > 0) {
+            Log.i(TAG, "解析: 複勝オッズ0(未確定)を${zeroCount}艇ぶん除外")
         }
         return map
     }
@@ -199,8 +211,19 @@ object OddsRepository {
 
         // 先頭6個を1〜6号艇へ割り当てる
         val map = HashMap<Int, Double?>()
+        var zeroCount = 0
         for (lane in 1..6) {
-            map[lane] = values[lane - 1].toDoubleOrNull() // "欠場"等は null
+            val v = values[lane - 1].toDoubleOrNull() // "欠場"等は null
+            // 複勝と同じく0以下は未確定。null にして記録から外す
+            map[lane] = if (v != null && v > 0.0) {
+                v
+            } else {
+                if (v != null) zeroCount++
+                null
+            }
+        }
+        if (zeroCount > 0) {
+            Log.i(TAG, "解析: 単勝オッズ0(未確定)を${zeroCount}艇ぶん除外")
         }
         return map
     }
