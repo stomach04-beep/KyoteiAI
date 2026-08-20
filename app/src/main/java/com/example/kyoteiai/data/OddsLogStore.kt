@@ -29,7 +29,7 @@ data class OddsSnapshot(
     val stadium: String,            // 場コード "24"
     val stadiumName: String,        // 場名 "大村"
     val raceNo: Int,                // レース番号
-    val deadline: String,           // 締切時刻 "22:41"
+    val deadline: String,           // 締切時刻 "20:41"（ナイター最終でも21時前）
     val observedAt: String,         // 実際に取得できた時刻 "HH:mm"
     val minsToDeadline: Int,        // 取得時点で締切まで何分だったか（＝この記録の鮮度そのもの）
     val odds: Map<Int, Double>,     // 艇番 → 単勝オッズ
