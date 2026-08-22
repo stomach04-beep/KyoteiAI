@@ -30,6 +30,35 @@ object EvPolicy {
     const val S1_DEMOTE_BETS = 200
     const val S1_DEMOTE_RATE = 90.0
 
+    // ── 事前登録した判定対象戦略（検討書 2-1b・2026-07-16改訂）──────────
+    // 昇格判定に数えるのは「C'≦5倍・昼」1本だけ。
+    // それ以外のC'成立は観測用（参考）であって、判定には使わない。
+    // 結果を見てから戦略を乗り換えるのは多重比較になるため。
+    // ※ PC側 settle_odds.py の ODDS_CAP / NIGHT_HOUR と同じ値。
+    //   片方だけ変えると集計と画面がズレるので、変えるときは必ず両方直す。
+
+    /** 判定対象に入る表示オッズの上限（減衰が中立な帯） */
+    const val REGISTERED_ODDS_CAP = 5.0
+
+    /** ナイター除外の境界。この時刻以降に締切るレースは判定対象外（減衰が最悪） */
+    const val REGISTERED_NIGHT_HOUR = 17
+
+    /**
+     * この◎が事前登録した判定対象（C'≦5倍・昼）に当たるか。
+     *
+     * @param odds 表示オッズ
+     * @param deadline 締切時刻 "HH:mm"。読めない場合は判定対象外（安全側）
+     */
+    fun isRegisteredTarget(odds: Double, deadline: String?): Boolean {
+        if (odds > REGISTERED_ODDS_CAP) return false
+        val hour = deadline?.substringBefore(":")?.toIntOrNull() ?: return false
+        return hour < REGISTERED_NIGHT_HOUR
+    }
+
+    /** 画面・通知に付ける区別の印。判定対象なら「判定対象」、それ以外は「参考」 */
+    fun targetLabel(odds: Double, deadline: String?): String =
+        if (isRegisteredTarget(odds, deadline)) "判定対象" else "参考"
+
     /**
      * C'判定の結果（そのレースの「◎1点」）。
      * lane=艇番 / prob=モデル1着確率 / odds=単勝オッズ / ev=期待値

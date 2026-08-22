@@ -237,6 +237,9 @@ class EvPickWorker(
             //   数値だけ個別に整形してから埋め込む（%が書式指定と誤解釈されて落ちるのを防ぐ）
             val evText = "%.2f".format(pick.ev)
             val oddsText = "%.1f".format(pick.odds)
+            // 事前登録した判定対象（C'≦5倍・昼）かどうか。
+            // 「参考」の◎を判定対象と同じ重みで買うと、昇格判定の前提が崩れる
+            val target = EvPolicy.targetLabel(pick.odds, race.deadline)
 
             if (minutes <= FINAL_CONFIRM_LEAD_MIN + 1) {
                 // ── 締切まで4分以内: この場で「確定」判定 ──────────────
@@ -258,7 +261,7 @@ class EvPickWorker(
                 if (notifyCount < DAILY_NOTIFY_CAP) {
                     NotificationHelper.sendEvPickNotification(
                         applicationContext, notifyId(key),
-                        "${race.stadiumName}${race.raceNo}R ◎${pick.lane}号艇 確定 EV$evText",
+                        "${race.stadiumName}${race.raceNo}R ◎${pick.lane}号艇 確定[$target] EV$evText",
                         "確率${(pick.prob * 100).toInt()}% × オッズ$oddsText / 締切${race.deadline}まで約${minutes}分\n" +
                             "直前オッズでC'成立。買うなら今（単勝1点・手動）。",
                         voteUrl = OddsRepository.raceVoteUrl(race.stadium, race.raceNo, dateYmd),
@@ -275,7 +278,7 @@ class EvPickWorker(
                 if (notifyCount < DAILY_NOTIFY_CAP) {
                     NotificationHelper.sendEvPickNotification(
                         applicationContext, notifyId(key),
-                        "${race.stadiumName}${race.raceNo}R ◎${pick.lane}号艇 候補 EV$evText",
+                        "${race.stadiumName}${race.raceNo}R ◎${pick.lane}号艇 候補[$target] EV$evText",
                         "確率${(pick.prob * 100).toInt()}% × オッズ$oddsText（暫定・締切${race.deadline}）\n" +
                             "締切${FINAL_CONFIRM_LEAD_MIN}分前に最新オッズで自動再判定→この通知を更新します。" +
                             "更新が来なければ買う前にアプリでオッズ再確認を。",

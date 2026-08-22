@@ -19,8 +19,8 @@ android {
         // 中身＝EV通知/購入記録/収支(v1.3)・3連単の非推奨表示(v1.4)・締切前オッズ収集をスマホへ移管(v1.5)・
         // 収集ワーカーの実行の足跡 run_log.json・締切前の複勝オッズも記録(v1.7)・通知アイコン刷新。
         // v1.8: 発売前の「オッズ0」を未確定として記録から除外（単勝・複勝とも）。
-        versionCode = 4
-        versionName = "1.8"
+        versionCode = 5
+        versionName = "1.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
