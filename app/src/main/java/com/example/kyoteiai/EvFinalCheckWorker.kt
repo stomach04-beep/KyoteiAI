@@ -109,9 +109,12 @@ class EvFinalCheckWorker(
                 // 締切前: 「◎確定」へ通知を上書き（同じ通知ID）
                 val evText = "%.2f".format(pick.ev)
                 val oddsText = "%.1f".format(pick.odds)
+                // 事前登録した判定対象（C'≦5倍・昼）かどうかを見出しに出す。
+                // 区別しないと、昇格判定に数えない「参考」の◎を同じ重みで買ってしまう
+                val target = EvPolicy.targetLabel(pick.odds, race.deadline)
                 NotificationHelper.sendEvPickNotification(
                     applicationContext, EvPickWorker.notifyId(key),
-                    "${race.stadiumName}${raceNo}R ◎${pick.lane}号艇 確定 EV$evText",
+                    "${race.stadiumName}${raceNo}R ◎${pick.lane}号艇 確定[$target] EV$evText",
                     "最新オッズで再判定→C'成立を維持。確率${(pick.prob * 100).toInt()}% × オッズ$oddsText\n" +
                         "締切${race.deadline}まで約${minutes}分。買うなら今（単勝1点・手動）。",
                     voteUrl = OddsRepository.raceVoteUrl(stadium, raceNo, dateYmd),
