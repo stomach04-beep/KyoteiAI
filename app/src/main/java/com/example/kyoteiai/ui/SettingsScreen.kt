@@ -65,6 +65,10 @@ fun SettingsScreen(onBack: () -> Unit) {
     var evNotifyEnabled by remember {
         mutableStateOf(prefs.getBoolean(EvPickWorker.KEY_EV_NOTIFY_ENABLED, true))
     }
+    // 「判定対象のみ通知」（既定OFF＝従来どおり全部の◎を通知する）
+    var targetOnlyNotify by remember {
+        mutableStateOf(prefs.getBoolean(EvPickWorker.KEY_TARGET_ONLY_NOTIFY, false))
+    }
     // 旧・確信度ベースの狙い目通知ON/OFF（既定OFF。参考情報が欲しい人だけON）
     var hotNotifyEnabled by remember { mutableStateOf(prefs.getBoolean("hot_notify_enabled", false)) }
 
@@ -129,6 +133,60 @@ fun SettingsScreen(onBack: () -> Unit) {
                             prefs.edit().putBoolean(EvPickWorker.KEY_EV_NOTIFY_ENABLED, it).apply()
                         }
                     )
+                }
+            }
+
+            // ── 判定対象のみ通知（通知ONのときだけ意味があるので、その時だけ出す）──
+            if (evNotifyEnabled) {
+                Spacer(modifier = Modifier.height(12.dp))
+                SectionHeader(
+                    title = "判定対象のみ通知",
+                    subtitle = "ONにすると、事前登録した判定対象（C'≦5倍・昼）の◎だけを通知します。" +
+                        "「参考」の◎は鳴りません。※記録とオッズ収集はこの設定に関係なく" +
+                        "これまでどおり全部続きます（データは一切減りません）"
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (targetOnlyNotify)
+                            MaterialTheme.colorScheme.primaryContainer
+                        else
+                            MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "参考の◎は通知しない",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = if (targetOnlyNotify)
+                                    "有効（判定対象の◎だけ通知）"
+                                else
+                                    "無効（すべての◎を通知・既定）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = targetOnlyNotify,
+                            onCheckedChange = {
+                                targetOnlyNotify = it
+                                prefs.edit()
+                                    .putBoolean(EvPickWorker.KEY_TARGET_ONLY_NOTIFY, it)
+                                    .apply()
+                            }
+                        )
+                    }
                 }
             }
 

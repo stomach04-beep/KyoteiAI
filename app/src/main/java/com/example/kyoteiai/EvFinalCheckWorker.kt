@@ -48,6 +48,9 @@ class EvFinalCheckWorker(
         )
         // 通知機能がOFFなら何もしない（EvPickWorkerと同じ方針）
         if (!prefs.getBoolean(EvPickWorker.KEY_EV_NOTIFY_ENABLED, true)) return Result.success()
+        // 「判定対象のみ通知」（既定OFF）。ONなら参考の◎は鳴らさない。
+        // 記録（picks.json）はこの設定に関わらず必ず行う
+        val targetOnlyNotify = prefs.getBoolean(EvPickWorker.KEY_TARGET_ONLY_NOTIFY, false)
 
         // フィードから対象レースを引き直す（確率・締切・場名はフィードが持っている）
         val feed = FeedRepository.load(applicationContext).feed ?: return Result.success()
@@ -60,13 +63,20 @@ class EvFinalCheckWorker(
         val minutes = TimeUtil.minutesUntilDeadline(race.deadline, System.currentTimeMillis())
         val beforeDeadline = minutes != null && minutes >= 0
 
+        // 候補通知を実際に出していたか（＝控えに載っているか）。
+        //  「判定対象のみ通知」で候補通知を抑えたレースは控えに載っていない。
+        //  そのレースに「見送りへ変更」を送ると、出していない通知を訂正する形になり
+        //  ユーザーには唐突な通知として届くので、決着系の通知は控えがある時だけ出す。
+        val hadCandidateNotice =
+            PendingCandidateStore.all(applicationContext).any { it.key == key }
+
         // 最新の単勝オッズで再判定
         val winOdds = OddsRepository.fetchWinOddsOnly(stadium, raceNo, dateYmd)
         if (winOdds == null) {
             // 取得失敗: 黙って終わると「候補だけ来て何も来ない」宙ぶらりんになる。
             // 締切前なら「再判定できず・手動確認を」で必ず決着させる（まだ買う時間がある）。
             // 締切後なら見送り扱い。どちらも候補控えを外す（スイープの二重通知を防ぐ）。
-            if (beforeDeadline) {
+            if (beforeDeadline && hadCandidateNotice) {
                 NotificationHelper.sendEvPickNotification(
                     applicationContext, EvPickWorker.notifyId(key),
                     "${race.stadiumName}${raceNo}R ⚠再判定できず",
@@ -76,7 +86,7 @@ class EvFinalCheckWorker(
                     stadium = stadium,
                     raceNo = raceNo
                 )
-            } else {
+            } else if (hadCandidateNotice) {
                 NotificationHelper.sendEvPickNotification(
                     applicationContext, EvPickWorker.notifyId(key),
                     "${race.stadiumName}${raceNo}R 見送り（締切）",
@@ -102,10 +112,27 @@ class EvFinalCheckWorker(
                     prob = pick.prob,
                     odds = pick.odds,
                     ev = pick.ev,
-                    observedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+                    observedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm")),
+                    // v2.0: S1昇格判定の標本（締切5分前以内・昼）かを後から機械判定するために残す。
+                    // これが無いと収支画面で「対象外・データ不足」にしかできない
+                    mins = minutes?.toInt(),
+                    deadline = race.deadline
                 )
             )
-            if (beforeDeadline) {
+            // この◎が事前登録の判定対象（C'≦5倍・昼）か。「判定対象のみ通知」の判断に使う
+            val isTarget = EvPolicy.isRegisteredTarget(pick.odds, race.deadline)
+            if (beforeDeadline && targetOnlyNotify && !isTarget) {
+                // 「判定対象のみ通知」ON かつ 参考の◎: 記録は上で済ませ、通知だけ出さない。
+                // 候補通知を出していた場合だけは、宙ぶらりんを残さないよう決着を伝える
+                if (hadCandidateNotice) {
+                    NotificationHelper.sendEvPickNotification(
+                        applicationContext, EvPickWorker.notifyId(key),
+                        "${race.stadiumName}${raceNo}R 参考（通知対象外）",
+                        "最新オッズではC'成立ですが、事前登録した判定対象（C'≦5倍・昼）ではないため" +
+                            "「判定対象のみ通知」設定により買い推奨は出しません。記録だけ残しています。"
+                    )
+                }
+            } else if (beforeDeadline) {
                 // 締切前: 「◎確定」へ通知を上書き（同じ通知ID）
                 val evText = "%.2f".format(pick.ev)
                 val oddsText = "%.1f".format(pick.odds)
@@ -122,7 +149,7 @@ class EvFinalCheckWorker(
                     stadium = stadium,
                     raceNo = raceNo
                 )
-            } else {
+            } else if (hadCandidateNotice) {
                 // 締切後（再判定が省電力で遅延）: もう買えないので見送りで閉じる。
                 //  記録は上で済んでいる（確定オッズ＝収支データとして正しい）。
                 NotificationHelper.sendEvPickNotification(
@@ -132,8 +159,10 @@ class EvFinalCheckWorker(
                         "締切済みのため買えません。見送り扱いです。"
                 )
             }
-        } else {
+        } else if (hadCandidateNotice) {
             // ── 消滅: 見送りへ変更（記録しない）─────────────────────────
+            //  これは候補通知の訂正なので、候補通知を出していたときだけ送る
+            //  （「判定対象のみ通知」で候補を抑えたレースに訂正だけ届くのを防ぐ）
             if (beforeDeadline) {
                 NotificationHelper.sendEvPickNotification(
                     applicationContext, EvPickWorker.notifyId(key),
@@ -152,6 +181,9 @@ class EvFinalCheckWorker(
         }
         // どの分岐でも決着通知を出したので候補控えを外す（スイープの二重通知を防ぐ）
         PendingCandidateStore.remove(applicationContext, key)
+        // ◎の記録が増えるのはこの経路が主なので、ウィジェットもここで描き直す
+        // （EvPickWorker の15分周期だけに任せると「直近◎」が最大15分古いまま出る）
+        KyoteiWidgetProvider.updateAll(applicationContext)
         return Result.success()
     }
 }

@@ -46,7 +46,15 @@ data class PickRecord(
     val observedAt: String,   // 観測時刻 "HH:mm"
     val settled: Boolean = false,
     val won: Boolean? = null,
-    val refund: Int = 0       // ¥100買ったと仮定した払戻額（円）
+    val refund: Int = 0,      // ¥100買ったと仮定した払戻額（円）
+    // ── ここから下は v2.0（2026-08-29）で追加。過去の記録は持たない（null）──
+    //  S1昇格判定の標本かどうかはPC側と揃えて
+    //  「PROTOCOL_START以降・締切5分前以内・C'≦5倍・昼」で決まるが、
+    //  そのうち mins（締切まで何分か）と deadline（締切時刻）はこれまで
+    //  記録していなかったため、過去分は判定できない＝「対象外・データ不足」になる。
+    //  ここから前向きに記録し、以後の記録だけで判定対象ラインを計算する。
+    val mins: Int? = null,        // 観測時点で締切まで何分だったか（＝この記録の鮮度）
+    val deadline: String? = null  // 締切時刻 "HH:mm"（昼/ナイターの判定に使う）
 )
 
 /** 実戦購入記録の保存・読込（bets.json） */
@@ -146,7 +154,13 @@ object PickLogRepository {
                     observedAt = o.optString("observedAt"),
                     settled = o.optBoolean("settled", false),
                     won = if (o.has("won") && !o.isNull("won")) o.optBoolean("won") else null,
-                    refund = o.optInt("refund", 0)
+                    refund = o.optInt("refund", 0),
+                    // v2.0 で増えた項目。古い記録にはキーが無いので null のまま読む
+                    // （0 を既定値にすると「締切0分前に取った」と誤読され、
+                    //   判定対象に混ざってしまうので必ず null と区別する）
+                    mins = if (o.has("mins") && !o.isNull("mins")) o.optInt("mins") else null,
+                    deadline = if (o.has("deadline") && !o.isNull("deadline"))
+                        o.optString("deadline") else null
                 )
             }
         } catch (e: Exception) {
@@ -174,6 +188,10 @@ object PickLogRepository {
                 put("settled", r.settled)
                 if (r.won != null) put("won", r.won)
                 put("refund", r.refund)
+                // v2.0 追加分。持っていない記録（過去分）はキーごと書かない＝
+                // 読み戻したときも null のままになり「データ不足」と正しく判別できる
+                if (r.mins != null) put("mins", r.mins)
+                if (r.deadline != null) put("deadline", r.deadline)
             })
         }
         atomicWrite(File(context.filesDir, FILE_NAME), arr.toString())

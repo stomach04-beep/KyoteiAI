@@ -140,6 +140,44 @@ object RunLogStore {
         if (!note.isNullOrEmpty()) day.put(K_NOTE, note)
     }
 
+    /**
+     * 1日ぶんの集計値（画面表示・前日欠測チェック用の読み出し口）。
+     *
+     * これまで run_log.json は「書く一方」で読み手が無く、収集が止まっていても
+     * 端末の画面からは分からなかった（データは残っていたのに読み手が居ないだけ）。
+     */
+    data class DayStats(
+        val date: String,      // "2026-08-29"
+        val runs: Int,         // EvPickWorker が動いた回数
+        val scheduled: Int,    // スナップショットを予約した数
+        val snapOk: Int,       // 実際に記録できた数
+        val snapFail: Int,     // 公式から取得できなかった数
+        val snapLate: Int,     // 締切超過で記録しなかった数（発火遅れ）
+        val firstAt: String?,  // その日の初回実行時刻 "HH:mm"
+        val lastAt: String?    // その日の最終実行時刻 "HH:mm"
+    )
+
+    /**
+     * 指定日の集計を返す（その日の記録が無ければ runs=0 の空集計）。
+     * 「記録が残っていない」と「0回だった」はどちらも異常なので区別せず runs=0 で返す。
+     */
+    fun dayStats(context: Context, date: String): DayStats = synchronized(lock) {
+        val day = loadRoot(context).optJSONObject(date) ?: JSONObject()
+        return DayStats(
+            date = date,
+            runs = day.optInt(K_RUNS, 0),
+            scheduled = day.optInt(K_SCHEDULED, 0),
+            snapOk = day.optInt(K_SNAP_OK, 0),
+            snapFail = day.optInt(K_SNAP_FAIL, 0),
+            snapLate = day.optInt(K_SNAP_LATE, 0),
+            firstAt = day.optString(K_FIRST_AT).ifEmpty { null },
+            lastAt = day.optString(K_LAST_AT).ifEmpty { null }
+        )
+    }
+
+    /** 今日ぶんの集計（今日タブの収集ヘルス表示用） */
+    fun todayStats(context: Context): DayStats = dayStats(context, LocalDate.now().toString())
+
     /** 直近 days 日ぶんを人が読める1行ずつの文字列にする（設定画面や adb での確認用） */
     fun recentSummary(context: Context, days: Int = 7): String = synchronized(lock) {
         val root = loadRoot(context)

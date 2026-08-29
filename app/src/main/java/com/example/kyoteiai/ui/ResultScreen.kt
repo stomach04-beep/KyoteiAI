@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.kyoteiai.data.EvPolicy
 import com.example.kyoteiai.data.NotifLogRepository
 import com.example.kyoteiai.data.NotifRecord
 import com.example.kyoteiai.data.PickRecord
@@ -186,12 +187,37 @@ private fun LedgerSection(ledger: LedgerUiState, resultRows: List<ResultRow>) {
                 ratePercent = ledger.virtual.ratePercent,
                 hasData = ledger.virtual.points > 0
             )
+            // 判定対象のみ（S1昇格判定に数える標本だけ）。
+            //  C'仮想には「参考」の◎や締切から離れた記録も混ざっており、
+            //  その数字で昇格を判断すると前提が崩れる。必ず別の行として並べる
+            LedgerLineView(
+                label = "判定対象",
+                detail = "${ledger.judge.points}点 的中${ledger.judge.hits}" +
+                    if (ledger.judge.pending > 0) "（結果待ち${ledger.judge.pending}）" else "",
+                ratePercent = ledger.judge.ratePercent,
+                hasData = ledger.judge.points > 0
+            )
             // A参考（今日のみ）
             LedgerLineView(
                 label = "A参考(今日)",
                 detail = "${aDecided.size}点 本命ベタ仮定",
                 ratePercent = aRate,
                 hasData = aDecided.isNotEmpty()
+            )
+
+            // 「判定対象」の読み方と、判定に必要な情報を持たない記録の件数。
+            //  数字が小さい理由を画面だけで説明できるようにする（黙って除外しない）
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "判定対象＝${EvPolicy.JUDGE_PROTOCOL_START}以降・締切${EvPolicy.JUDGE_MINS_MAX}分前以内・" +
+                    "C'≦${EvPolicy.REGISTERED_ODDS_CAP.toInt()}倍・昼（〜${EvPolicy.REGISTERED_NIGHT_HOUR}時）の記録だけ。" +
+                    "S1昇格判定はこの行だけで行う（PC側の集計と同じ条件）。" +
+                    if (ledger.judgeShortage > 0)
+                        "\n※ うち${ledger.judgeShortage}件は締切までの分数を記録していない古い記録のため" +
+                            "「対象外・データ不足」として除外しています（今後の記録から判定可能）。"
+                    else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             // ステージ判定（購入方針 第2部の基準を機械適用した文言）

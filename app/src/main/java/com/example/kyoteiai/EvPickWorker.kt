@@ -7,6 +7,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.example.kyoteiai.data.CollectionWindow
 import com.example.kyoteiai.data.EvPolicy
 import com.example.kyoteiai.data.FeedRepository
 import com.example.kyoteiai.data.OddsLogStore
@@ -44,8 +45,15 @@ import java.util.concurrent.TimeUnit
  * 【ガード】
  *  - 同一レースは1日1回しか処理しない（チェック済み集合）
  *  - 通知は1日15件まで
- *  - 8時前・21時以降は動かない（発売時間外にサイトを叩かない）
+ *  - 8時前は動かない。終わりの時刻は収集と通知で別（CollectionWindow 参照）:
+ *      収集・スナップショット予約 … 21:30まで（ナイター最終レースを取りこぼさない）
+ *      ◎通知                     … 21:00まで（夜遅くに買い推奨を鳴らさない）
  *  - フィードが今日の日付でなければ何もしない（古い予想で誤通知しない）
+ *
+ * 【取りこぼし防止（v2.0）】
+ *  通知経路で直接オッズを取りに行って失敗した場合は、必ず OddsSnapshotWorker の
+ *  予約に回す。締切前オッズはその場で取らないと永久に失われるため、
+ *  「予約もない・再挑戦もない」状態を作らないことを最優先にする。
  */
 class EvPickWorker(
     appContext: Context,
@@ -61,18 +69,29 @@ class EvPickWorker(
         //  検証用のデータが黙って貯まらなくなっていた（2026-07-14 19:08以降に実際に発生）。
         //  締切前オッズはその場で record しないと永久に失われるので、通知とは切り離す。
         const val KEY_ODDS_COLLECT_ENABLED = "odds_collect_enabled"
+
+        // 「判定対象のみ通知」トグル（既定OFF＝現状維持）。
+        //  ONにすると、事前登録した判定対象（C'≦5倍・昼）でない◎は通知しない。
+        //  ※ 記録（picks.json）とオッズ収集はこの設定に関わらず必ず全部続ける。
+        //    通知を絞るのは「鳴る回数を減らす」ためであって、データを間引くためではない。
+        const val KEY_TARGET_ONLY_NOTIFY = "target_only_notify"
+
         private const val KEY_CHECKED_SET = "ev_checked_set"    // 処理済みレースキー集合
         private const val KEY_CHECKED_DATE = "ev_checked_date"  // 集合をリセットした日付
         private const val KEY_NOTIFY_COUNT = "ev_notify_count"  // 当日の通知数
+        private const val KEY_YDAY_CHECK_DATE = "ev_yday_check_date" // 前日欠測チェック済みの日
 
         private const val NOTIFY_WINDOW_MIN = 18L   // 締切の何分前から対象にするか
         // このWorkerの実行周期（KyoteiAIApp の PeriodicWorkRequest と必ず揃える）。
         // 取得失敗時に「次回実行でも間に合うか」を判断するのに使う。
         const val WORK_PERIOD_MIN = 15L
         private const val DAILY_NOTIFY_CAP = 15     // 1日の通知上限
-        private const val QUIET_START_HOUR = 21     // この時刻以降は動かない
-        private const val QUIET_END_HOUR = 8        // この時刻より前は動かない
         private const val FETCH_GAP_MS = 800L       // レース間の取得間隔（礼儀）
+
+        // ── 稼働時間帯の境界について ────────────────────────────────
+        //  収集（〜21:30）と通知（〜21:00）は止めたい理由が別物なので、
+        //  境界の定数は CollectionWindow に分けて置いてある（同じ「21」でも統合しない）。
+        //  ここで再定義すると必ずズレるので、判定は必ず CollectionWindow を呼ぶこと。
 
         // 最終確認（2段階目）を締切の何分前に走らせるか。
         // 早い時間帯のオッズは投票が薄く「幻の高EV」が出やすい（実例: 締切4分前12.9倍→確定2.1倍）。
@@ -84,6 +103,18 @@ class EvPickWorker(
     }
 
     override suspend fun doWork(): Result {
+        // ホーム画面ウィジェットは、どの経路でこの実行が終わっても必ず描き直す。
+        //  早期return（収集時間外・フィード失敗・対象レース無し）でも古い表示を残さない。
+        //  finally に置くのは、return が何か所もあるため書き漏らしを構造で防ぐ狙い。
+        return try {
+            runCollection()
+        } finally {
+            KyoteiWidgetProvider.updateAll(applicationContext)
+        }
+    }
+
+    /** 本体（収集・通知）。ウィジェット更新は doWork 側の finally が担当する */
+    private suspend fun runCollection(): Result {
         // 実行の足跡を最初に残す（早期returnより前）。
         //  2026-07-27 に収集が丸一日ゼロになったとき、「ワーカーが動かなかったのか、
         //  動いたが何もしなかったのか」を示す記録が端末に無く原因究明ができなかった。
@@ -95,12 +126,19 @@ class EvPickWorker(
         )
 
         // 通知と収集は独立。両方OFFのときだけ何もしない
-        val notifyEnabled = prefs.getBoolean(KEY_EV_NOTIFY_ENABLED, true)
+        val notifySetting = prefs.getBoolean(KEY_EV_NOTIFY_ENABLED, true)
         val collectEnabled = prefs.getBoolean(KEY_ODDS_COLLECT_ENABLED, true)
-        if (!notifyEnabled && !collectEnabled) {
+        // 「判定対象のみ通知」（既定OFF）。通知を絞るだけで、記録・収集には一切影響させない
+        val targetOnlyNotify = prefs.getBoolean(KEY_TARGET_ONLY_NOTIFY, false)
+        if (!notifySetting && !collectEnabled) {
             RunLogStore.noteStage(applicationContext, "収集も通知もOFF")
             return Result.success()
         }
+
+        // ── 前日の収集が異常だったら知らせる（1日1回・朝の初回実行時）──────────
+        //  収集が丸一日ゼロでも、これまでは誰も気づけずデータだけ静かに欠けていた
+        //  （2026-07-27の事故）。run_log.json は残っているので読み手を用意する。
+        CollectionHealthMonitor.checkYesterday(applicationContext, prefs, KEY_YDAY_CHECK_DATE)
 
         // ── 取りこぼし回収スイープ（ネットワーク不要・発売時間外でも実施）───────────
         //  候補通知を出したのに、締切3分前の再判定（EvFinalCheckWorker）が
@@ -108,11 +146,26 @@ class EvPickWorker(
         //  これで「候補だけ来て確定も見送りも来ない」宙ぶらりんを必ず解消する。
         sweepStalePendingCandidates()
 
-        // 発売時間外（深夜・早朝・21時以降）はサイトを叩かない
-        val hour = LocalDateTime.now().hour
-        if (hour < QUIET_END_HOUR || hour >= QUIET_START_HOUR) {
-            RunLogStore.noteStage(applicationContext, "発売時間外(${hour}時)")
+        // ── 稼働時間帯の判定（収集と通知で境界が違う）─────────────────────
+        //  収集の窓（〜21:30）から外れていれば、この先は何もしない。
+        //  収集の窓の中で通知の窓（〜21:00）から外れていれば、
+        //  「収集だけする・◎通知は出さない」状態で処理を続ける（ナイター最終レース対策）。
+        val nowTime = LocalDateTime.now()
+        if (!CollectionWindow.canCollect(nowTime)) {
+            RunLogStore.noteStage(
+                applicationContext,
+                "収集時間外(%02d:%02d)".format(nowTime.hour, nowTime.minute)
+            )
             return Result.success()
+        }
+        val notifyAllowedNow = CollectionWindow.canNotify(nowTime)
+        // 以降の「通知してよいか」はこの1変数に集約する（設定ONかつ通知の時間帯内）
+        val notifyEnabled = notifySetting && notifyAllowedNow
+        if (notifySetting && !notifyAllowedNow) {
+            RunLogStore.noteStage(
+                applicationContext,
+                "通知時間外(%02d:%02d)＝収集のみ継続".format(nowTime.hour, nowTime.minute)
+            )
         }
 
         // 日付が変わっていたら処理済み集合と通知カウントをリセット
@@ -150,6 +203,11 @@ class EvPickWorker(
             return Result.success()
         }
         val dateYmd = feed.date.filter { it.isDigit() }
+
+        // 今日のレースの締切一覧をウィジェット用に控える。
+        //  ウィジェットは通信できないので、フィードを持っているこのタイミングでしか書けない。
+        //  「次の締切まであと何分」はこの控えから描画時に計算する
+        KyoteiWidgetProvider.saveTodayDeadlines(prefs, feed)
 
         val checked = prefs.getStringSet(KEY_CHECKED_SET, emptySet())!!.toMutableSet()
         var notifyCount = prefs.getInt(KEY_NOTIFY_COUNT, 0)
@@ -201,6 +259,21 @@ class EvPickWorker(
             val fetched = OddsRepository.fetchWinAndPlaceOdds(race.stadium, race.raceNo, dateYmd)
             val winOdds = fetched?.win
             if (winOdds == null) {
+                // ── 取得失敗。ここが「前向き実測データを永久に失う」急所 ─────────
+                //  締切4分以内に初めて見つけたレースは、二重取得を避けるために
+                //  スナップショット予約をスキップして「この場の直接取得」に頼っている
+                //  （willFetchNowForNotify）。その直接取得が失敗すると、
+                //  予約も無い・次回実行（15分後）は締切超過、で再挑戦がゼロになり、
+                //  そのレースの締切前オッズは二度と取れない。
+                //  → 失敗したら必ずスナップショット予約に回し、リトライを持つ
+                //    OddsSnapshotWorker（MAX_ATTEMPTS=2）に拾わせる。
+                //  条件を willFetchNowForNotify に限っているのは、それ以外のレースは
+                //  上で既に予約済みだから。ここで無条件に呼ぶと予約数だけが二重に増え、
+                //  「予約に対して記録が少ない＝取得側が悪い」という切り分けが効かなくなる。
+                if (collectEnabled && willFetchNowForNotify) {
+                    scheduleOddsSnapshot(race.stadium, race.raceNo, minutesNow)
+                    RunLogStore.noteScheduled(applicationContext)
+                }
                 // 未発売・圏外などは fallback通知を出さない方針は維持する。
                 // ただし「処理済み」を取り消せる場合は取り消す：この実行は15分周期なので、
                 // 締切まで15分以上あるレースは次回もまだ間に合う。取り消さないと、
@@ -239,7 +312,12 @@ class EvPickWorker(
             val oddsText = "%.1f".format(pick.odds)
             // 事前登録した判定対象（C'≦5倍・昼）かどうか。
             // 「参考」の◎を判定対象と同じ重みで買うと、昇格判定の前提が崩れる
+            val isTarget = EvPolicy.isRegisteredTarget(pick.odds, race.deadline)
             val target = EvPolicy.targetLabel(pick.odds, race.deadline)
+
+            // 「判定対象のみ通知」がONなら、参考の◎は鳴らさない（既定OFF＝従来どおり全部鳴る）。
+            // ここで抑えるのは通知だけ。この下の記録（picks.json）は必ず実行する
+            val notifyThisPick = notifyCount < DAILY_NOTIFY_CAP && (!targetOnlyNotify || isTarget)
 
             if (minutes <= FINAL_CONFIRM_LEAD_MIN + 1) {
                 // ── 締切まで4分以内: この場で「確定」判定 ──────────────
@@ -255,10 +333,14 @@ class EvPickWorker(
                         prob = pick.prob,
                         odds = pick.odds,
                         ev = pick.ev,
-                        observedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+                        observedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm")),
+                        // v2.0: 判定対象（締切5分前以内・昼）かを後から機械判定するために残す。
+                        // これが無いと収支画面で「対象外・データ不足」にしかできない
+                        mins = minutes.toInt(),
+                        deadline = race.deadline
                     )
                 )
-                if (notifyCount < DAILY_NOTIFY_CAP) {
+                if (notifyThisPick) {
                     NotificationHelper.sendEvPickNotification(
                         applicationContext, notifyId(key),
                         "${race.stadiumName}${race.raceNo}R ◎${pick.lane}号艇 確定[$target] EV$evText",
@@ -274,8 +356,11 @@ class EvPickWorker(
             } else {
                 // ── まだ早い: 「候補」通知＋締切3分前の自動再判定を予約 ──────
                 //  早い時間帯のオッズは薄く幻の高EVが出やすいので、記録はまだしない。
-                //  再判定の結果は同じ通知IDで「◎確定」または「見送りへ変更」に上書きされる
-                if (notifyCount < DAILY_NOTIFY_CAP) {
+                //  再判定の結果は同じ通知IDで「◎確定」または「見送りへ変更」に上書きされる。
+                //  「判定対象のみ通知」で候補通知を抑えた場合は候補控えにも入れない
+                //  （控えに入れると、後のスイープが「見送り」通知を出してしまい抑えた意味がなくなる）。
+                //  ただし締切3分前の再判定は必ず予約する＝記録は設定に関わらず取り続ける。
+                if (notifyThisPick) {
                     NotificationHelper.sendEvPickNotification(
                         applicationContext, notifyId(key),
                         "${race.stadiumName}${race.raceNo}R ◎${pick.lane}号艇 候補[$target] EV$evText",

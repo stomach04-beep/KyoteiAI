@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.kyoteiai.data.BetRepository
-import com.example.kyoteiai.data.EvPolicy
 import com.example.kyoteiai.data.PickLogRepository
 import com.example.kyoteiai.data.PickRecord
 import com.example.kyoteiai.data.ResultRepository
@@ -108,20 +107,22 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             refund = settledBets.sumOf { it.refund },
             pending = bets.size - settledBets.size
         )
-        val settledPicks = picks.filter { it.settled }
-        val virtualLine = LedgerLine(
-            label = "C'仮想（観測全部を¥100）",
-            points = settledPicks.size,
-            hits = settledPicks.count { it.won == true },
-            invest = settledPicks.size * 100,
-            refund = settledPicks.sumOf { it.refund },
-            pending = picks.size - settledPicks.size
-        )
+        // C'仮想（観測した◎を全部¥100買った仮定）。計算は純関数へ寄せる
+        val virtualLine = LedgerCalc.tally("C'仮想（観測全部を¥100）", picks)
+
+        // ── 判定対象のみ（S1昇格判定に数える標本だけ）─────────────────
+        //  条件は EvPolicy の単一定義＝PC側 judge_summary と同じ物差し。
+        //  mins/deadline を持たない古い記録はここに入らない（データ不足として別に数える）
+        val judgePicks = LedgerCalc.judgeTargets(picks)
+        val judgeLine = LedgerCalc.tally("判定対象のみ", judgePicks)
+
         return LedgerUiState(
             loading = loading,
             real = realLine,
             virtual = virtualLine,
-            stageText = buildStageText(realLine),
+            judge = judgeLine,
+            judgeShortage = LedgerCalc.dataShortageCount(picks),
+            stageText = LedgerCalc.stageText(judgeLine, realLine.points),
             // 通知履歴: C'成立の観測記録を新しい順に（日付降順→観測時刻降順）
             history = picks.sortedWith(
                 compareByDescending<PickRecord> { it.date }
@@ -130,33 +131,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    /**
-     * ステージ判定の文言を作る（検討書 第2部のS0/S1基準をそのまま機械適用）。
-     * 判断を感情から切り離すため、基準と現在地を数字で明示する。
-     */
-    private fun buildStageText(real: LedgerLine): String {
-        val n = real.points
-        val rate = real.ratePercent
-        if (n == 0) {
-            return "ステージ: S0（紙トレ中）。実戦記録はまだありません。" +
-                "S1開始は4月分の再現確認後を推奨。"
-        }
-        val rateText = "%.1f%%".format(rate)
-        return when {
-            // 降格ライン: 200点時点で90%未満
-            n >= EvPolicy.S1_DEMOTE_BETS && rate < EvPolicy.S1_DEMOTE_RATE ->
-                "ステージ判定: 実戦${n}点で回収率$rateText → 降格ライン" +
-                    "（${EvPolicy.S1_DEMOTE_BETS}点で${EvPolicy.S1_DEMOTE_RATE}%未満）に該当。紙トレ(S0)へ戻す。"
-            // 昇格ライン: 300点で105%超
-            n >= EvPolicy.S1_PROMOTE_BETS && rate > EvPolicy.S1_PROMOTE_RATE ->
-                "ステージ判定: 実戦${n}点で回収率$rateText → S2（増額）昇格条件" +
-                    "（${EvPolicy.S1_PROMOTE_BETS}点で${EvPolicy.S1_PROMOTE_RATE}%超）を達成。"
-            else ->
-                "ステージ: S1（少額実戦）。実戦${n}点・回収率$rateText。" +
-                    "昇格まであと${maxOf(0, EvPolicy.S1_PROMOTE_BETS - n)}点" +
-                    "（${EvPolicy.S1_PROMOTE_BETS}点で${EvPolicy.S1_PROMOTE_RATE}%超が条件）。"
-        }
-    }
+    // ステージ判定の文言は LedgerCalc.stageText（純関数）へ移した。
+    // 判定に使う物差しは EvPolicy の1本だけを見る（画面側で条件を書き写さない）。
 }
 
 /** 収支1本分（実戦 or C'仮想）。pending=結果待ちの記録数 */
@@ -174,11 +150,20 @@ data class LedgerLine(
     val hitPercent: Double get() = if (points > 0) hits * 100.0 / points else 0.0
 }
 
-/** 収支セクションの状態。history=EV通知（C'成立観測）の履歴・新しい順 */
+/**
+ * 収支セクションの状態。history=EV通知（C'成立観測）の履歴・新しい順。
+ *
+ * judge = 判定対象のみ（S1昇格判定に数える標本だけの仮想収支）。
+ * judgeShortage = 判定に必要な mins/deadline を持たない記録の数。
+ *   v2.0 より前の記録は「締切5分前以内だったか」を確認できないので判定対象に入れられない。
+ *   件数を隠さず出すことで「なぜ判定対象が少ないのか」を画面だけで説明できるようにする。
+ */
 data class LedgerUiState(
     val loading: Boolean = false,
     val real: LedgerLine = LedgerLine("実戦（買った記録）", 0, 0, 0, 0, 0),
     val virtual: LedgerLine = LedgerLine("C'仮想（観測全部を¥100）", 0, 0, 0, 0, 0),
+    val judge: LedgerLine = LedgerLine("判定対象のみ", 0, 0, 0, 0, 0),
+    val judgeShortage: Int = 0,
     val stageText: String = "",
     val history: List<PickRecord> = emptyList()
 )

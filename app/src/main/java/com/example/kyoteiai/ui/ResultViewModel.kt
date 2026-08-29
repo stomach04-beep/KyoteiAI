@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +25,7 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import kotlin.random.Random
 
 /**
  * 「結果」画面のUI状態を管理する ViewModel。
@@ -39,8 +41,20 @@ import java.time.format.DateTimeFormatter
  */
 class ResultViewModel(app: Application) : AndroidViewModel(app) {
 
-    // 同時に叩く公式サイトへのリクエスト上限（重すぎないよう数本に絞る）
-    private val maxConcurrency = 4
+    // ── 公式サイトへの当たり方（EvPickWorker の FETCH_GAP_MS と同じ思想）─────────
+    //  結果タブは締切超過レースをまとめて取りに行くので、無加減だと
+    //  「同時4本・間隔ゼロ」で数十リクエストが一気に刺さる。
+    //  公式に絞られると結果が取れないだけでなく、同じ時間帯に走っている
+    //  締切前オッズの収集まで巻き添えで失敗する。収集は取り直しがきかない
+    //  （その場で取らないと永久に失われる）側なので、結果取得の方が譲る。
+    //  → 同時2本まで＋1リクエストごとに300〜500msの間隔を空ける。
+
+    /** 同時に叩く公式サイトへのリクエスト上限 */
+    private val maxConcurrency = 2
+
+    /** リクエスト間に空ける間隔（ミリ秒）の下限・上限。毎回同じ間隔にせず少し散らす */
+    private val fetchGapMinMs = 300L
+    private val fetchGapMaxMs = 500L
 
     // 取得済み結果のメモリキャッシュ（キー = "stadium-raceNo"）。
     //  値が RaceResult なら確定、キーが無ければ未取得。
@@ -149,8 +163,11 @@ class ResultViewModel(app: Application) : AndroidViewModel(app) {
                         // 取得済み（確定）は初期描画で反映済みなのでスキップ
                         if (synchronized(resultCache) { resultCache.containsKey(key) }) return@async
 
-                        // 公式サイトから着順を取得（同時実行はセマフォで制限）
+                        // 公式サイトから着順を取得（同時実行はセマフォで制限）。
+                        //  取りに行く直前に間隔を空ける。permit を持っている間に待つので、
+                        //  「同時2本 × 1本あたり300〜500ms間隔」でリクエスト密度が決まる。
                         val result = semaphore.withPermit {
+                            delay(Random.nextLong(fetchGapMinMs, fetchGapMaxMs + 1))
                             ResultRepository.fetchResult(
                                 stadium = race.stadium,
                                 raceNo = race.raceNo,
