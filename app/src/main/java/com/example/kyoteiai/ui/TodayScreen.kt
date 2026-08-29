@@ -36,8 +36,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.kyoteiai.data.Feed
+import com.example.kyoteiai.data.OddsLogStore
 import com.example.kyoteiai.data.PickLogRepository
 import com.example.kyoteiai.data.RacePred
+import com.example.kyoteiai.data.RunLogStore
 import com.example.kyoteiai.data.TimeUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -89,7 +91,40 @@ fun TodayScreen(
         }
     }
 
+    // ── 収集ヘルス（run_log.json / odds_log.json の読み手）─────────────
+    //  これまでこの2つのファイルは「書く一方」で、収集が止まっていても
+    //  端末の画面からは分からなかった（データは残っているのに読み手が居なかった）。
+    //  60秒ごとに読み直す（ローカルファイルのみ・ネット不使用）。
+    //  記録するのは Worker＝このプロセスの外なので、画面側から定期的に
+    //  読み直さないと表示だけ古いままになる（feedback_stateflow_out_of_band_reload）。
+    var healthText by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            healthText = withContext(Dispatchers.IO) {
+                val s = RunLogStore.todayStats(context)
+                val total = OddsLogStore.count(context)
+                "今日: 実行${s.runs}回・予約${s.scheduled}・記録${s.snapOk}・失敗${s.snapFail}" +
+                    (if (s.lastAt != null) "・最終${s.lastAt}" else "・未実行") +
+                    "（累計${total}件）"
+            }
+            kotlinx.coroutines.delay(60_000)
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
+
+        // ── 収集ヘルス1行 ────────────────────────────────────────
+        //  今日の収集が生きているかをここだけで判断できるようにする。
+        //  実行0回・記録0件が続いていたら、その日の締切前オッズは失われつつある
+        healthText?.let { text ->
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+        }
 
         // ── 「狙い目のみ」トグル行 ───────────────────────────────
         Row(

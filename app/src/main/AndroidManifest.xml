@@ -75,5 +75,19 @@
             </intent-filter>
         </receiver>
 
+        <!-- ホーム画面ウィジェット（判定対象◎件数・直近◎・本日の記録数・次の締切）。
+             APPWIDGET_UPDATE はシステムブロードキャストなので exported=true が必須
+             （false にすると配置しても一度も更新されない。feedback_receiver_exported） -->
+        <receiver
+            android:name=".KyoteiWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/kyotei_widget_info" />
+        </receiver>
+
     </application>
 </manifest>

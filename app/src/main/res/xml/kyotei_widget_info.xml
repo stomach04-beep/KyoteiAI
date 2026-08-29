@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  KyoteiAI ウィジェットの定義（AppWidgetProviderInfo）
+
+  - minWidth/minHeight: 4列x2行（250dp x 110dp）＝3行＋直近◎を収める大きさ
+  - updatePeriodMillis: 1800000（30分）。OS最小値が30分なのでこれ以上短くしても無視される。
+    実際の更新は EvPickWorker（15分周期）の末尾から明示的に叩くのが本命で、
+    ここでの30分はアプリが動いていない時の保険。
+  - resizeMode: ユーザーがホーム画面でリサイズ可能
+  - previewLayout は指定しない（付けない方針）
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="80dp"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_kyotei"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen" />

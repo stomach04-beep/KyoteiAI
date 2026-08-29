@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  KyoteiAI ホーム画面ウィジェット（RemoteViews）
+
+  【RemoteViewsの制約（feedback_widget_remoteviews）】
+  - <View> は使えない → 区切り線は <TextView> の background で代用する
+  - カスタムView / RecyclerView は不可
+  - 使えるのは TextView / ImageView / LinearLayout / FrameLayout / RelativeLayout / Button 等だけ
+  - 違反してもクラッシュログが出ず「真っ白なウィジェット」になるだけなので気づけない
+
+  【表示内容】3行
+   1行目: 本日の判定対象◎の件数（＋直近◎の「場R・艇・EV」）
+   2行目: 本日の記録数と最終記録時刻（収集が生きているかがひと目で分かる）
+   3行目: 次の締切までの分数
+
+  【色】背景が半透明の黒なので文字は必ず明るい色にする（feedback_widget_dark_bg）。
+        暗い色を置くと背景に沈んで読めなくなる。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_background"
+    android:padding="10dp">
+
+    <!-- 1行目：本日の判定対象◎の件数（主役なので大きめ） -->
+    <TextView
+        android:id="@+id/widget_target_count"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="#FFFFFFFF"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="判定対象◎ -件" />
+
+    <!-- 直近の◎（場R・艇・EV）。無い日は「まだありません」 -->
+    <TextView
+        android:id="@+id/widget_latest_pick"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="#FFE0E0E0"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:paddingTop="2dp"
+        android:text="直近◎ —" />
+
+    <!-- 区切り線：<View> が使えないので高さ1dpの TextView で代用する -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#55FFFFFF"
+        android:layout_marginTop="6dp"
+        android:layout_marginBottom="6dp"
+        android:text="" />
+
+    <!-- 2行目：本日の記録数と最終記録時刻（収集の生死） -->
+    <TextView
+        android:id="@+id/widget_collect"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="#FFE0E0E0"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="記録 -件" />
+
+    <!-- 3行目：次の締切までの分数 -->
+    <TextView
+        android:id="@+id/widget_next_deadline"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="#FFE0E0E0"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:paddingTop="2dp"
+        android:text="次の締切 —" />
+
+</LinearLayout>

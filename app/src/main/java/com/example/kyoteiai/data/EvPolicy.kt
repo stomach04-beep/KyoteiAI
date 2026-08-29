@@ -59,6 +59,47 @@ object EvPolicy {
     fun targetLabel(odds: Double, deadline: String?): String =
         if (isRegisteredTarget(odds, deadline)) "判定対象" else "参考"
 
+    // ── S1昇格判定に数える「記録」の条件（PC側 settle_odds.py judge_summary と同一）──
+    // ※ 片方だけ変えると集計と画面がズレる。変えるときは必ずPC側と両方直す。
+
+    /**
+     * ルール確定日（PC側 PROTOCOL_START と同値）。
+     * これより前の記録は「オッズ≦5倍」「昼のみ」の条件選びに使った標本なので、
+     * 同じ標本で採点すると自己採点（必ず良く見える）になるため数えない。
+     */
+    const val JUDGE_PROTOCOL_START = "2026-07-16"
+
+    /**
+     * 締切この分数前以内の記録だけ数える（PC側 JUDGE_MINS_MAX と同値）。
+     * 旧PC収集（9〜11分前）はオッズ減衰の幅が別物で、混ぜると数字が濁る。
+     */
+    const val JUDGE_MINS_MAX = 5
+
+    /**
+     * 観測記録1件が「S1昇格判定の標本（判定対象）」に入るか。
+     * 条件は4つとも必要（PC側 settle_odds.py judge_summary と同じ順・同じ値）:
+     *   ① PROTOCOL_START以降  ② 締切 JUDGE_MINS_MAX 分前以内
+     *   ③ 表示オッズ ≦ REGISTERED_ODDS_CAP  ④ 締切が REGISTERED_NIGHT_HOUR 時前（昼）
+     *
+     * 純関数（Context非依存）にしてあるのは、画面（LedgerViewModel）と
+     * 単体テストが同じ1本の定義を見るため。条件を画面側に書き写すと必ずズレる。
+     *
+     * @param date     記録日 "2026-07-16"
+     * @param odds     観測時の単勝オッズ
+     * @param deadline 締切時刻 "HH:mm"。v2.0より前の記録は持たない（null）→ 判定対象外
+     * @param mins     観測時点の締切までの分数。v2.0より前の記録は持たない（null）
+     *                 → 締切≦5分を確認できないので判定対象外（データ不足・安全側）
+     */
+    fun isJudgeTargetRecord(date: String, odds: Double, deadline: String?, mins: Int?): Boolean {
+        // ① ルール確定前の標本は自己採点になるので数えない
+        if (date < JUDGE_PROTOCOL_START) return false
+        // ② 締切5分前以内の層に統一（旧PC収集の9〜11分前とは減衰の幅が別物）。
+        //    mins を持たない古い記録はここで落ちる＝「対象外・データ不足」扱い
+        if (mins == null || mins < 0 || mins > JUDGE_MINS_MAX) return false
+        // ③④ C'≦5倍・昼（deadline が null / 壊れていれば安全側で対象外）
+        return isRegisteredTarget(odds, deadline)
+    }
+
     /**
      * C'判定の結果（そのレースの「◎1点」）。
      * lane=艇番 / prob=モデル1着確率 / odds=単勝オッズ / ev=期待値
