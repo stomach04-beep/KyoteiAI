@@ -28,12 +28,14 @@ import java.util.concurrent.TimeUnit
  *
  * 【動作】15分周期の PeriodicWork。役割は「収集」と「通知」の2つで、独立にON/OFFできる。
  *
- *  ＜収集（KEY_ODDS_COLLECT_ENABLED・既定ON）＞
+ *  ＜収集（KEY_ODDS_COLLECT_ENABLED・**2026-09-05 から既定OFF**）＞
  *   1. 締切が「今から0〜18分以内」のレースを対象にする
  *   2. 各レースについて OddsSnapshotWorker を「締切3分前ちょうど」に予約する
  *      （ここでは公式サイトを叩かない＝この Worker は予約係）
  *   3. 実際の取得と odds_log.json への保存は OddsSnapshotWorker が行う
- *   → 締切前オッズはその場で取らないと永久に失われるため、通知とは切り離して常時動かす
+ *   → もともとは「締切前オッズはその場で取らないと永久に失われる」ので常時動かしていたが、
+ *     競艇AIの研究打ち切りで貯める先が無くなったため既定OFFにした。
+ *     既定値は DEFAULT_ODDS_COLLECT_ENABLED（この1か所だけが実際の挙動を決める）
  *
  *  ＜通知（KEY_EV_NOTIFY_ENABLED・既定ON）＞
  *   1. 対象レースの単勝オッズを公式から取得（逐次・0.8秒間隔の礼儀取得）
@@ -64,11 +66,28 @@ class EvPickWorker(
         // HotRaceWorker と同じ SharedPreferences を共用する
         const val KEY_EV_NOTIFY_ENABLED = "ev_notify_enabled"   // 通知ON/OFF（既定ON）
 
-        // オッズ収集のON/OFF（既定ON）。通知とは独立させてある。
+        // オッズ収集のON/OFF。通知とは独立させてある。
         //  以前は「通知OFF＝オッズ取得もしない」だったため、通知を切ると収集まで止まり、
         //  検証用のデータが黙って貯まらなくなっていた（2026-07-14 19:08以降に実際に発生）。
-        //  締切前オッズはその場で record しないと永久に失われるので、通知とは切り離す。
+        //  締切前オッズはその場で record しないと永久に失われるので、通知とは切り離してある。
         const val KEY_ODDS_COLLECT_ENABLED = "odds_collect_enabled"
+
+        /**
+         * 収集の既定値。2026-09-05 に ON → OFF へ変更した。
+         *
+         * 理由：競艇AIの研究を打ち切ったため。モデル側は天井97.7%（検証88〜92）、
+         * 控除率側もポイント還元の最良1.25%（必要2.3%）で不合格と実測して決着し、
+         * 集めた締切前オッズの使い道が無くなった。PC側の取り込み（KyoteiDecaySettle の
+         * import_phone_odds.py）も同日に止めたので、集め続けても誰も読まない＝
+         * 公式サイトを無駄に叩くだけになる。
+         *
+         * このキーは設定画面にも保存値にも存在せず、この既定値だけが実際の挙動を決める。
+         * だからアプリを更新すれば既存の端末でもそのまま収集が止まる（移行処理は要らない）。
+         * 再開したくなったらここを true に戻すだけでよい。
+         *
+         * 既定値を参照側に直書きすると必ずズレるので、参照はすべてこの定数を通すこと。
+         */
+        const val DEFAULT_ODDS_COLLECT_ENABLED = false
 
         // 「判定対象のみ通知」トグル（既定OFF＝現状維持）。
         //  ONにすると、事前登録した判定対象（C'≦5倍・昼）でない◎は通知しない。
@@ -127,7 +146,9 @@ class EvPickWorker(
 
         // 通知と収集は独立。両方OFFのときだけ何もしない
         val notifySetting = prefs.getBoolean(KEY_EV_NOTIFY_ENABLED, true)
-        val collectEnabled = prefs.getBoolean(KEY_ODDS_COLLECT_ENABLED, true)
+        val collectEnabled = prefs.getBoolean(
+            KEY_ODDS_COLLECT_ENABLED, DEFAULT_ODDS_COLLECT_ENABLED
+        )
         // 「判定対象のみ通知」（既定OFF）。通知を絞るだけで、記録・収集には一切影響させない
         val targetOnlyNotify = prefs.getBoolean(KEY_TARGET_ONLY_NOTIFY, false)
         if (!notifySetting && !collectEnabled) {
@@ -138,7 +159,14 @@ class EvPickWorker(
         // ── 前日の収集が異常だったら知らせる（1日1回・朝の初回実行時）──────────
         //  収集が丸一日ゼロでも、これまでは誰も気づけずデータだけ静かに欠けていた
         //  （2026-07-27の事故）。run_log.json は残っているので読み手を用意する。
-        CollectionHealthMonitor.checkYesterday(applicationContext, prefs, KEY_YDAY_CHECK_DATE)
+        //
+        //  ※収集OFFのときは点検しない（2026-09-05 追加）。
+        //    意図的に止めているのに「前日の収集がゼロ」と判定され、毎朝アラートが
+        //    鳴り続けてしまう。止めた対象の監視を残すと誤警報になるのは、同日にPC側の
+        //    health-watchdog で停止タスクを監視リストから外したのとまったく同じ話。
+        if (collectEnabled) {
+            CollectionHealthMonitor.checkYesterday(applicationContext, prefs, KEY_YDAY_CHECK_DATE)
+        }
 
         // ── 取りこぼし回収スイープ（ネットワーク不要・発売時間外でも実施）───────────
         //  候補通知を出したのに、締切3分前の再判定（EvFinalCheckWorker）が
