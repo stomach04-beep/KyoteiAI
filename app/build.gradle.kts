@@ -26,8 +26,10 @@ android {
         //   ・結果タブの取得を並列2＋300〜500ms間隔へ（公式の絞り対策）
         //   ・今日タブに収集ヘルス1行／ホーム画面ウィジェット新設
         //   ・前日欠測のセルフ検知通知／収集のみ21:30まで延長／「判定対象のみ通知」トグル
-        versionCode = 6
-        versionName = "2.0"
+        // v2.1（2026-09-05）競艇AI研究の打ち切りに伴い、締切前オッズの収集を既定OFFへ。
+        //   あわせて収集OFF時は前日欠測アラートを鳴らさない（止めた対象の監視は誤警報になる）
+        versionCode = 7
+        versionName = "2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
