@@ -28,8 +28,10 @@ android {
         //   ・前日欠測のセルフ検知通知／収集のみ21:30まで延長／「判定対象のみ通知」トグル
         // v2.1（2026-09-05）競艇AI研究の打ち切りに伴い、締切前オッズの収集を既定OFFへ。
         //   あわせて収集OFF時は前日欠測アラートを鳴らさない（止めた対象の監視は誤警報になる）
-        versionCode = 7
-        versionName = "2.1"
+        // v2.2（2026-09-05）EV狙い目通知も既定OFFへ（EV買いは実測81〜91%で本命買いに負ける）。
+        //   あわせて通知も収集も無効なら締切のexactアラームを張らない（空打ちで端末を起こさない）
+        versionCode = 8
+        versionName = "2.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
