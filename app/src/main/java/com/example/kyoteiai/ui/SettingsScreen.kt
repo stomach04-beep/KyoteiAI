@@ -63,7 +63,7 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     // EV狙い目（◎1点）通知のON/OFF（既定ON。Phase 2の主役通知）
     var evNotifyEnabled by remember {
-        mutableStateOf(prefs.getBoolean(EvPickWorker.KEY_EV_NOTIFY_ENABLED, true))
+        mutableStateOf(prefs.getBoolean(EvPickWorker.KEY_EV_NOTIFY_ENABLED, EvPickWorker.DEFAULT_EV_NOTIFY_ENABLED))
     }
     // 「判定対象のみ通知」（既定OFF＝従来どおり全部の◎を通知する）
     var targetOnlyNotify by remember {

@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit
  *     競艇AIの研究打ち切りで貯める先が無くなったため既定OFFにした。
  *     既定値は DEFAULT_ODDS_COLLECT_ENABLED（この1か所だけが実際の挙動を決める）
  *
- *  ＜通知（KEY_EV_NOTIFY_ENABLED・既定ON）＞
+ *  ＜通知（KEY_EV_NOTIFY_ENABLED・2026-09-05 から既定OFF）＞
  *   1. 対象レースの単勝オッズを公式から取得（逐次・0.8秒間隔の礼儀取得）
  *   2. その場のオッズでEVを計算し、C'条件（EvPolicy: EV≥1.2かつ確率≥0.2のEV最大1点）が
  *      成立したレースだけ通知する
@@ -64,7 +64,20 @@ class EvPickWorker(
 
     companion object {
         // HotRaceWorker と同じ SharedPreferences を共用する
-        const val KEY_EV_NOTIFY_ENABLED = "ev_notify_enabled"   // 通知ON/OFF（既定ON）
+        const val KEY_EV_NOTIFY_ENABLED = "ev_notify_enabled"   // 通知ON/OFF
+
+        /**
+         * EV狙い目（◎1点）通知の既定値。2026-09-05 に ON → OFF へ変更した。
+         *
+         * 理由：この通知が勧めているのは「EV買い」だが、実測で回収率81〜91%と
+         * 素朴な本命買い（90.5%）にすら勝てないことが確定した（検証88〜92）。
+         * 勝てないと分かっている買い方を鳴らし続ける意味がない。
+         *
+         * ※この端末では以前から利用者が手動でOFFにしてあるため、実挙動は変わらない。
+         *   ここを直すのは、再インストールしたときに既定ONで復活しないようにするため。
+         *   設定画面のトグルは残してあるので、見たくなればONに戻せる。
+         */
+        const val DEFAULT_EV_NOTIFY_ENABLED = false
 
         // オッズ収集のON/OFF。通知とは独立させてある。
         //  以前は「通知OFF＝オッズ取得もしない」だったため、通知を切ると収集まで止まり、
@@ -145,7 +158,7 @@ class EvPickWorker(
         )
 
         // 通知と収集は独立。両方OFFのときだけ何もしない
-        val notifySetting = prefs.getBoolean(KEY_EV_NOTIFY_ENABLED, true)
+        val notifySetting = prefs.getBoolean(KEY_EV_NOTIFY_ENABLED, DEFAULT_EV_NOTIFY_ENABLED)
         val collectEnabled = prefs.getBoolean(
             KEY_ODDS_COLLECT_ENABLED, DEFAULT_ODDS_COLLECT_ENABLED
         )

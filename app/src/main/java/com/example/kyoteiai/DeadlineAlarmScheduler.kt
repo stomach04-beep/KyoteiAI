@@ -55,12 +55,37 @@ object DeadlineAlarmScheduler {
     }
 
     /**
+     * このアラームが起こす仕事（EV通知・オッズ収集・確信度通知）が1つでも有効か。
+     *
+     * アラームは DeadlineAlarmReceiver → EvPickWorker / HotRaceWorker を叩くためだけに在る。
+     * 3つとも無効なら、起こした先で何もせず返るだけなので、張る意味がない。
+     * 2026-09-05 に収集を既定OFFにした結果、通知も収集も切れている端末では
+     * 1日150本以上の setExactAndAllowWhileIdle が「端末を起こして何もしない」だけの
+     * 空打ちになっていたため、ここで止める。
+     */
+    private fun isAnyDeadlineWorkEnabled(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(HotRaceWorker.PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(
+            EvPickWorker.KEY_EV_NOTIFY_ENABLED, EvPickWorker.DEFAULT_EV_NOTIFY_ENABLED
+        ) || prefs.getBoolean(
+            EvPickWorker.KEY_ODDS_COLLECT_ENABLED, EvPickWorker.DEFAULT_ODDS_COLLECT_ENABLED
+        ) || prefs.getBoolean("hot_notify_enabled", false)
+    }
+
+    /**
      * フィード内の当日レースの締切から逆算して、exactアラームをまとめて登録する。
      * 今日の日付のフィードでなければ何もしない（古い予想でアラームを張らない）。
      */
     fun scheduleFromFeed(context: Context, feed: Feed) {
         val today = LocalDate.now().toString()
         if (feed.date != today) return
+
+        // 起こす先の仕事が全部OFFなら張らない（空打ちで端末を起こさない）。
+        // 既に張ってあるぶんは、アプリ更新・端末再起動でOSが消すので追加の取り消しは要らない。
+        if (!isAnyDeadlineWorkEnabled(context)) {
+            Log.i(TAG, "通知も収集もOFFのため締切アラームは張らない")
+            return
+        }
 
         // 各レースの「締切15分前」を計算。同じ分に複数場の締切が重なることが多いので、
         // 分単位で重複排除して1本のアラームにまとめる（発火時のWorkerはフィード全体を

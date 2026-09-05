@@ -47,7 +47,7 @@ class EvFinalCheckWorker(
             HotRaceWorker.PREFS_NAME, Context.MODE_PRIVATE
         )
         // 通知機能がOFFなら何もしない（EvPickWorkerと同じ方針）
-        if (!prefs.getBoolean(EvPickWorker.KEY_EV_NOTIFY_ENABLED, true)) return Result.success()
+        if (!prefs.getBoolean(EvPickWorker.KEY_EV_NOTIFY_ENABLED, EvPickWorker.DEFAULT_EV_NOTIFY_ENABLED)) return Result.success()
         // 「判定対象のみ通知」（既定OFF）。ONなら参考の◎は鳴らさない。
         // 記録（picks.json）はこの設定に関わらず必ず行う
         val targetOnlyNotify = prefs.getBoolean(EvPickWorker.KEY_TARGET_ONLY_NOTIFY, false)
