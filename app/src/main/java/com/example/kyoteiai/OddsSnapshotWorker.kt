@@ -57,11 +57,16 @@ class OddsSnapshotWorker(
         val raceNo = inputData.getInt(KEY_RACE_NO, -1)
         if (raceNo < 0) return Result.success()
 
-        // 収集スイッチ（既定ON）。通知のON/OFFとは独立させてある。
+        // 収集スイッチ。通知のON/OFFとは独立させてある。
+        // 既定値は EvPickWorker.DEFAULT_ODDS_COLLECT_ENABLED が唯一の定義（2026-09-05 以降OFF）。
         val prefs = applicationContext.getSharedPreferences(
             HotRaceWorker.PREFS_NAME, Context.MODE_PRIVATE
         )
-        if (!prefs.getBoolean(EvPickWorker.KEY_ODDS_COLLECT_ENABLED, true)) {
+        if (!prefs.getBoolean(
+                EvPickWorker.KEY_ODDS_COLLECT_ENABLED,
+                EvPickWorker.DEFAULT_ODDS_COLLECT_ENABLED
+            )
+        ) {
             Log.i(TAG, "$stadium/${raceNo}R 収集OFFのためスキップ")
             RunLogStore.noteSnapshot(applicationContext, RunLogStore.Snap.SKIP, "収集OFF")
             return Result.success()
