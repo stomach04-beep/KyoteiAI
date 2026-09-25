@@ -30,8 +30,10 @@ android {
         //   あわせて収集OFF時は前日欠測アラートを鳴らさない（止めた対象の監視は誤警報になる）
         // v2.2（2026-09-05）EV狙い目通知も既定OFFへ（EV買いは実測81〜91%で本命買いに負ける）。
         //   あわせて通知も収集も無効なら締切のexactアラームを張らない（空打ちで端末を起こさない）
-        versionCode = 8
-        versionName = "2.2"
+        // v2.3（2026-09-25）フィード取得が戻ったら失敗警告の通知を消す。
+        //   狙い目レース通知は実際に出せたときだけ「通知済み」に記録する
+        versionCode = 9
+        versionName = "2.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

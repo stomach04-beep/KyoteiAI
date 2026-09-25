@@ -1,12 +1,17 @@
 package com.example.kyoteiai
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.example.kyoteiai.data.NotifLogRepository
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -98,20 +103,43 @@ object NotificationHelper {
     }
 
     /**
+     * 通知を実際に出せる状態かを判定する（アプリ内の判定はこの1か所だけ）。
+     * 許可なし・アプリ通知OFF・チャンネルOFFのときに notify しても黙って捨てられるため、
+     * 「通知済み」を記録する前にここで確かめる。
+     */
+    fun canPostNotification(context: Context, channelId: String): Boolean {
+        // Android 13+ は実行時許可が無いと出せない
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return false
+        // アプリ全体の通知がOFF
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        // チャンネル単位でOFF（チャンネルが無ければ作られる前なので出せる扱い）
+        val channel = context.getSystemService(NotificationManager::class.java)
+            .getNotificationChannel(channelId)
+        return channel == null || channel.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
+    /**
      * 狙い目レースの通知を送信する。
      *
      * @param notifyId 通知ID（レースごとに一意にして重ならないようにする）
      * @param title 例「徳山7R 締切20分前」
      * @param message 例「本命1号艇 松田憲幸 / 確信度81%」
+     * @return 実際に通知を出せたら true（出せなければ呼び出し側は「通知済み」を記録しない）
      */
     fun sendHotRaceNotification(
         context: Context,
         notifyId: Int,
         title: String,
         message: String
-    ) {
+    ): Boolean {
         // 送信前にチャンネルの存在を保証（冪等）
         ensureChannels(context)
+
+        // 出せない状態なら送らずに false（次の回でもう一度試せるようにする）
+        if (!canPostNotification(context, HOT_RACE_CHANNEL_ID)) return false
 
         val manager = context.getSystemService(NotificationManager::class.java)
 
@@ -126,6 +154,12 @@ object NotificationHelper {
 
         manager.notify(notifyId, notification)
         logNotification(context, title, message)  // 時系列ログにも残す
+        return true
+    }
+
+    /** 指定IDの通知を消す（状態が治ったときに警告を残さないため） */
+    fun cancel(context: Context, notifyId: Int) {
+        NotificationManagerCompat.from(context).cancel(notifyId)
     }
 
     /**
