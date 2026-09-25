@@ -79,6 +79,8 @@ object FeedHealthMonitor {
                 .putInt(KEY_FAIL_STREAK, 0)
                 .remove(KEY_LAST_FAIL_DATE)
                 .apply()
+            // カウンタを戻すのと同じ所で「フィード取得が失敗しています」通知も消す（治っても残らないように）
+            NotificationHelper.cancel(context, NOTIFY_ID)
         }
     }
 }

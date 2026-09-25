@@ -103,7 +103,9 @@ class HotRaceWorker(
 
             // レースキーから安定した通知IDを作る（同一レースは同じIDで上書き）
             val notifyId = key.hashCode()
-            NotificationHelper.sendHotRaceNotification(applicationContext, notifyId, title, message)
+            // 実際に出せたときだけ「通知済み」に入れる（出せなければ次の回で再試行できるように）
+            val posted = NotificationHelper.sendHotRaceNotification(applicationContext, notifyId, title, message)
+            if (!posted) continue
 
             notified.add(key)
             changed = true
