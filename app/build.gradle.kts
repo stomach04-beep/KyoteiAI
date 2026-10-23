@@ -32,8 +32,9 @@ android {
         //   あわせて通知も収集も無効なら締切のexactアラームを張らない（空打ちで端末を起こさない）
         // v2.3（2026-09-25）フィード取得が戻ったら失敗警告の通知を消す。
         //   狙い目レース通知は実際に出せたときだけ「通知済み」に記録する
-        versionCode = 9
-        versionName = "2.3"
+        // v2.4（2026-10-23）表示の決まり UiKit を今日タブ・結果画面に適用（見た目だけ。計算は不変）
+        versionCode = 10
+        versionName = "2.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -17,18 +17,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.kyoteiai.ui.kit.num
 
 // ───────────────────────────────────────────────────────────────
 // 競艇UIの共通部品（確信度バッジ・艇色・確率バーなど）
 // ───────────────────────────────────────────────────────────────
-
-// 確信度バッジの色（本命勝率で3段階）
-//   0.70以上 → 緑（◎ 本命鉄板）
-//   0.55以上 → 青（○ やや堅い）
-//   それ未満 → 灰（印なし）
-private val BadgeGreen = Color(0xFF2E7D32)
-private val BadgeBlue = Color(0xFF1565C0)
-private val BadgeGray = Color(0xFF757575)
 
 /** 本命勝率(0.0〜1.0)から確信度バッジの記号を返す（◎/○/なし） */
 fun confidenceMark(topProb: Double): String = when {
@@ -37,32 +30,39 @@ fun confidenceMark(topProb: Double): String = when {
     else -> ""
 }
 
-/** 本命勝率からバッジ背景色を返す */
-fun confidenceColor(topProb: Double): Color = when {
-    topProb >= 0.70 -> BadgeGreen
-    topProb >= 0.55 -> BadgeBlue
-    else -> BadgeGray
-}
-
 /**
- * 確信度バッジ。例「◎ 72%」（緑）／「○ 58%」（青）／「40%」（灰）。
+ * 確信度バッジ。例「◎ 72%」／「○ 58%」／「40%」。
+ * 2026-10-23 表示の決まり UiKit：本命の強弱は primary 1色の濃淡で示す
+ * （以前の緑・青・灰の直書きは、C'バッジの深緑と見分けがつかなかった）。
+ *   ◎ → primary の塗り
+ *   ○ → 文字だけ＋primary の細枠（狙い目カードの primaryContainer 地に埋もれないよう塗らない）
+ *   印なし → 補足色の文字だけ
  */
 @Composable
 fun ConfidenceBadge(topProb: Double) {
     val pct = (topProb * 100).toInt()
     val mark = confidenceMark(topProb)
     val label = if (mark.isEmpty()) "${pct}%" else "$mark ${pct}%"
+    val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(50)
+    val (bg, fg, borderColor) = when (mark) {
+        "◎" -> Triple(scheme.primary, scheme.onPrimary, null)
+        "○" -> Triple(Color.Transparent, scheme.primary, scheme.primary)
+        else -> Triple(Color.Transparent, scheme.onSurfaceVariant, null)
+    }
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(confidenceColor(topProb))
+            .clip(shape)
+            .background(bg)
+            .then(if (borderColor != null) Modifier.border(1.dp, borderColor, shape) else Modifier)
             .padding(horizontal = 10.dp, vertical = 4.dp)
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelLarge.num(),
             fontWeight = FontWeight.Bold,
-            color = Color.White
+            color = fg,
+            maxLines = 1
         )
     }
 }
@@ -95,7 +95,8 @@ fun LaneSquare(lane: Int) {
             .size(28.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(bg)
-            .border(1.dp, Color(0xFFBDBDBD), RoundedCornerShape(6.dp)),
+            // 枠線はテーマの色（2026-10-23 UiKit。艇色そのものは競艇の決まりなので変えない）
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp)),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -108,7 +109,9 @@ fun LaneSquare(lane: Int) {
 }
 
 /**
- * 勝率を表す横棒バー（0.0〜1.0）。艇色で塗り、背景は薄いグレー。
+ * 勝率を表す横棒バー（0.0〜1.0）。艇色で塗り、下地はテーマの surfaceVariant。
+ * 2026-10-23 UiKit：固定の薄いグレー(E0E0E0)だとダークで白い板が浮き、
+ * ライトでは1号艇の白いバーと見分けにくかったためテーマ色にした。
  */
 @Composable
 fun ProbabilityBar(prob: Double, lane: Int, modifier: Modifier = Modifier) {
@@ -117,7 +120,7 @@ fun ProbabilityBar(prob: Double, lane: Int, modifier: Modifier = Modifier) {
         modifier = modifier
             .height(10.dp)
             .clip(RoundedCornerShape(5.dp))
-            .background(Color(0xFFE0E0E0))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Box(
             modifier = Modifier
@@ -128,7 +131,7 @@ fun ProbabilityBar(prob: Double, lane: Int, modifier: Modifier = Modifier) {
                 .border(
                     // 白艇は背景に埋もれるので枠線を付ける
                     if (lane == 1) 1.dp else 0.dp,
-                    Color(0xFFBDBDBD),
+                    MaterialTheme.colorScheme.outline,
                     RoundedCornerShape(5.dp)
                 )
         )

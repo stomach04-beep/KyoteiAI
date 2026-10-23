@@ -1,7 +1,6 @@
 package com.example.kyoteiai.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,11 +14,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,10 +28,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.kyoteiai.data.Feed
 import com.example.kyoteiai.data.OddsLogStore
@@ -41,6 +38,11 @@ import com.example.kyoteiai.data.PickLogRepository
 import com.example.kyoteiai.data.RacePred
 import com.example.kyoteiai.data.RunLogStore
 import com.example.kyoteiai.data.TimeUtil
+import com.example.kyoteiai.ui.kit.Fmt
+import com.example.kyoteiai.ui.kit.HeroStat
+import com.example.kyoteiai.ui.kit.InfoToggle
+import com.example.kyoteiai.ui.kit.Panel
+import com.example.kyoteiai.ui.kit.PanelShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -113,16 +115,21 @@ fun TodayScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // ── 収集ヘルス1行 ────────────────────────────────────────
-        //  今日の収集が生きているかをここだけで判断できるようにする。
-        //  実行0回・記録0件が続いていたら、その日の締切前オッズは失われつつある
-        healthText?.let { text ->
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+        // ── 主役：本日の狙い目の件数（2026-10-23 表示の決まり UiKit）──────
+        //  以前は先頭に開発者向けの収集集計が1行で出ていた。画面を開いて最初に
+        //  知りたいのは「今日の狙い目が何件あるか」なので、それを HeroStat にする
+        Panel(
+            emphasized = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            HeroStat(
+                label = "本日の狙い目",
+                value = state.feed?.hotCount?.toString() ?: Fmt.EMPTY,
+                unit = if (state.feed != null) "件" else null,
+                sub = "AIが高確信と判断したレース",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
             )
         }
 
@@ -130,23 +137,36 @@ fun TodayScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Text(
+                text = "狙い目のみ表示",
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Switch(checked = hotOnly, onCheckedChange = onHotOnlyChange)
+        }
+
+        // ── 収集の状況（ふだんは畳む）────────────────────────────
+        //  今日の収集が生きているかを確かめる開発者向けの集計。
+        //  実行0回・記録0件が続いていたら、その日の締切前オッズは失われつつある。
+        //  中身と60秒ごとの読み直しは従来どおり（表示場所だけ InfoToggle へ移した）
+        healthText?.let { text ->
+            InfoToggle(
+                title = "収集の状況",
+                modifier = Modifier.padding(horizontal = 16.dp)
+            ) {
                 Text(
-                    text = "狙い目のみ表示",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                val hotCount = state.feed?.hotCount ?: 0
-                Text(
-                    text = "AIが高確信と判断したレース（本日 ${hotCount} 件）",
+                    text = text,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp)
                 )
             }
-            Switch(checked = hotOnly, onCheckedChange = onHotOnlyChange)
         }
 
         when {
@@ -193,8 +213,9 @@ fun TodayScreen(
                 if (cprimeKeys.isNotEmpty()) {
                     Text(
                         text = "◎C' = 締切前オッズで買い条件成立（EV≥1.2・確率≥0.2、本日${cprimeKeys.size}レース）",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF2E7D32),
+                        // 凡例は補足色の12sp（2026-10-23 UiKit。緑の直書きをやめた）
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
@@ -302,18 +323,18 @@ private fun RaceRow(
     cprime: Boolean,
     onClick: () -> Unit
 ) {
-    // 締切済みは薄く、狙い目は縁を強調
+    // 締切済みは薄く、狙い目は薄い primary の地（primaryContainer）で示す
     val alpha = if (past) 0.5f else 1f
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
-        colors = CardDefaults.cardColors(
-            containerColor = if (race.isHot && !past)
-                MaterialTheme.colorScheme.primaryContainer
-            else
-                MaterialTheme.colorScheme.surfaceVariant
-        )
+    // 2026-10-23 表示の決まり UiKit：影のある Card をやめ、Panel と同じ面（角丸 PanelShape・地は surface）にする。
+    // 狙い目（買いの合図）だけ primaryContainer の地にする（Panel は地の色を選べないので Surface で同じ形を作る）
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = PanelShape,
+        color = if (race.isHot && !past)
+            MaterialTheme.colorScheme.primaryContainer
+        else
+            MaterialTheme.colorScheme.surface
     ) {
         Row(
             modifier = Modifier
@@ -331,38 +352,44 @@ private fun RaceRow(
                         text = "${race.stadiumName} ${race.raceNo}R",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
+                    // 締切済みは危険ではないので赤にしない（2026-10-23 UiKit：赤は危険だけ）。
+                    // 行全体と同じく薄くして「もう終わった」ことを示す
                     Text(
                         text = if (past) "締切済み ${race.deadline}" else "締切 ${race.deadline}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (past) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+                        maxLines = 1
                     )
                 }
                 Text(
                     text = "本命 ${race.topLane}号艇 ${race.topName}",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
-            // ◎C'バッジ（締切前オッズで買い条件が成立したレース。深緑＝レース詳細と同色）
+            // ◎C'バッジ（締切前オッズで買い条件が成立したレース）。
+            // 2026-10-23 UiKit：隣の確信度◎（primary の塗り）と色で見分けられなかったため、
+            // primary の枠線だけの札にして「形」で区別する
             if (cprime) {
-                Box(
+                Text(
+                    text = "◎C'",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF1B5E20))
+                        .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(4.dp))
                         .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "◎C'",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
+                )
                 Spacer(modifier = Modifier.width(6.dp))
             }
             // 確信度バッジ

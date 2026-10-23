@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -17,8 +18,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -43,7 +42,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.kyoteiai.ui.kit.Fmt
+import com.example.kyoteiai.ui.kit.HeroStat
+import com.example.kyoteiai.ui.kit.InfoToggle
+import com.example.kyoteiai.ui.kit.Panel
+import com.example.kyoteiai.ui.kit.Tone
+import com.example.kyoteiai.ui.kit.ToneChip
+import com.example.kyoteiai.ui.kit.num
 
 /**
  * 「結果」タブ：締切を過ぎたレースの実際の着順と、AI本命が的中したかを表示する。
@@ -153,13 +161,11 @@ private fun LedgerSection(ledger: LedgerUiState, resultRows: List<ResultRow>) {
     val aRefund = aDecided.sumOf { row -> if (row.hit == true) row.result!!.payoutWin!! else 0 }
     val aRate = if (aInvest > 0) aRefund * 100.0 / aInvest else 0.0
 
-    Card(
+    // 2026-10-23 表示の決まり UiKit：影のある Card をやめ Panel（面）にする
+    Panel(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),  // 横はLazyColumnのcontentPaddingが持つ
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            .padding(vertical = 4.dp)  // 横はLazyColumnのcontentPaddingが持つ
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
@@ -207,25 +213,28 @@ private fun LedgerSection(ledger: LedgerUiState, resultRows: List<ResultRow>) {
 
             // 「判定対象」の読み方と、判定に必要な情報を持たない記録の件数。
             //  数字が小さい理由を画面だけで説明できるようにする（黙って除外しない）
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "判定対象＝${EvPolicy.JUDGE_PROTOCOL_START}以降・締切${EvPolicy.JUDGE_MINS_MAX}分前以内・" +
-                    "C'≦${EvPolicy.REGISTERED_ODDS_CAP.toInt()}倍・昼（〜${EvPolicy.REGISTERED_NIGHT_HOUR}時）の記録だけ。" +
-                    "S1昇格判定はこの行だけで行う（PC側の集計と同じ条件）。" +
-                    if (ledger.judgeShortage > 0)
-                        "\n※ うち${ledger.judgeShortage}件は締切までの分数を記録していない古い記録のため" +
-                            "「対象外・データ不足」として除外しています（今後の記録から判定可能）。"
-                    else "",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
             // ステージ判定（購入方針 第2部の基準を機械適用した文言）
             if (ledger.stageText.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = ledger.stageText,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // 「判定対象」の読み方は内部用語の解説なので、ふだんは畳む（2026-10-23 UiKit）。
+            //  文言・件数は従来どおり（黙って除外しない方針はそのまま、開けば読める）
+            InfoToggle(title = "「判定対象」の読み方") {
+                Text(
+                    text = "判定対象＝${EvPolicy.JUDGE_PROTOCOL_START}以降・締切${EvPolicy.JUDGE_MINS_MAX}分前以内・" +
+                        "C'≦${EvPolicy.REGISTERED_ODDS_CAP.toInt()}倍・昼（〜${EvPolicy.REGISTERED_NIGHT_HOUR}時）の記録だけ。" +
+                        "S1昇格判定はこの行だけで行う（PC側の集計と同じ条件）。" +
+                        if (ledger.judgeShortage > 0)
+                            "\n※ うち${ledger.judgeShortage}件は締切までの分数を記録していない古い記録のため" +
+                                "「対象外・データ不足」として除外しています（今後の記録から判定可能）。"
+                        else "",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -233,7 +242,10 @@ private fun LedgerSection(ledger: LedgerUiState, resultRows: List<ResultRow>) {
     }
 }
 
-/** 収支1行の表示。「ラベル 詳細 … 回収率XX%」。100%以上は緑・未満は既定色 */
+/**
+ * 収支1行の表示。「ラベル 詳細 … 回収率XX%」。
+ * 2026-10-23 UiKit：損益の方向に色を付けない決まりなので、100%以上の緑をやめ数字だけで示す
+ */
 @Composable
 private fun LedgerLineView(label: String, detail: String, ratePercent: Double, hasData: Boolean) {
     Row(
@@ -256,13 +268,12 @@ private fun LedgerLineView(label: String, detail: String, ratePercent: Double, h
             modifier = Modifier.weight(1f)
         )
         Text(
-            text = if (hasData) "%.1f%%".format(ratePercent) else "—",
-            style = MaterialTheme.typography.titleSmall,
+            text = if (hasData) Fmt.withUnit(ratePercent, 1, "%") else Fmt.EMPTY,
+            style = MaterialTheme.typography.titleSmall.num(),
             fontWeight = FontWeight.Bold,
-            color = if (hasData && ratePercent >= 100.0)
-                Color(0xFF2E7D32)  // 100%以上＝緑（損益分岐超え）
-            else
-                MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.End,
+            maxLines = 1
         )
     }
 }
@@ -276,19 +287,18 @@ private fun LedgerLineView(label: String, detail: String, ratePercent: Double, h
 private fun HistorySection(history: List<PickRecord>) {
     var expanded by remember { mutableStateOf(false) }
 
-    Card(
+    // 2026-10-23 UiKit：Card → Panel、見出し行は押せる高さ48dp以上
+    Panel(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),  // 横はLazyColumnのcontentPaddingが持つ
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            .padding(vertical = 4.dp)  // 横はLazyColumnのcontentPaddingが持つ
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             // 見出し行（タップで開閉）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .clickable { expanded = !expanded },
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -297,7 +307,10 @@ private fun HistorySection(history: List<PickRecord>) {
                     text = "◎確定レースの履歴（${history.size}件）",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)  // 開閉ラベルを押し出さない
                 )
                 Text(
                     text = if (expanded) "閉じる ▲" else "開く ▼",
@@ -311,8 +324,8 @@ private fun HistorySection(history: List<PickRecord>) {
                 // この欄の読み方（前提の明記）
                 Text(
                     text = "締切直前の再判定で「買い」と確定したレースの記録です。" +
-                        "金額は「毎回¥100買っていたら」の仮想成績（実際に買ったかは関係ありません）。",
-                    style = MaterialTheme.typography.labelSmall,
+                        "金額は「毎回100円買っていたら」の仮想成績（実際に買ったかは関係ありません）。",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(6.dp))
@@ -338,7 +351,7 @@ private fun HistorySection(history: List<PickRecord>) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "※ 直近7日分のみ表示（それ以前も記録は保持）",
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -372,21 +385,27 @@ private fun DayHistoryBlock(date: String, records: List<PickRecord>) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 左の長い文字には weight を付ける（無いと右の損益が幅0で消える。2026-10-23 UiKit）
         Text(
             text = "$md　${records.size}レース" +
                 (if (settled.isNotEmpty()) "（的中$hits・外れ${settled.size - hits}" +
                     (if (pending > 0) "・待ち$pending" else "") + "）"
                  else "（全件結果待ち）"),
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
         )
         if (settled.isNotEmpty()) {
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
-                // 例: +¥110 / −¥390
-                text = (if (profit >= 0) "+¥$profit" else "−¥${-profit}"),
-                style = MaterialTheme.typography.titleSmall,
+                // 例: +110円 / −390円（損益は色でなく符号で示す。2026-10-23 UiKit）
+                text = Fmt.signedYen(profit.toDouble()),
+                style = MaterialTheme.typography.titleSmall.num(),
                 fontWeight = FontWeight.Bold,
-                color = if (profit >= 0) Color(0xFF2E7D32) else Color(0xFFB71C1C)
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1
             )
         }
     }
@@ -412,7 +431,7 @@ private fun DayHistoryBlock(date: String, records: List<PickRecord>) {
  * ◎確定履歴の1行。
  * 1行目 = どのレースで何号艇か（＋確定時刻）、
  * 2行目 = なぜ買いだったか（AI確率とオッズのズレ＝期待値）、
- * 右    = 結果を±円で表示（¥100買った仮定。的中は +利益、外れは −¥100）。
+ * 右    = 結果を±円で表示（100円買った仮定。的中は +利益、外れは −100円）。
  */
 @Composable
 private fun HistoryRowView(p: PickRecord) {
@@ -436,25 +455,16 @@ private fun HistoryRowView(p: PickRecord) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        // 結果バッジ（±円）: 的中=+利益（緑）/ 外れ=−¥100（赤）/ 結果待ち（灰）
-        val (label, color) = when {
-            !p.settled -> "結果待ち" to Color(0xFF757575)
-            p.won == true -> "的中 +¥${p.refund - 100}" to Color(0xFF2E7D32)
-            else -> "外れ −¥100" to Color(0xFFB71C1C)
+        // 結果の札（±円）: 的中=+利益 / 外れ=−100円 / 結果待ち。
+        // 2026-10-23 UiKit：損は危険ではないので赤にしない。的中は「良好」の緑の札、
+        // 外れ・結果待ちは通常の灰の札。金額は符号つきの「円」にそろえる
+        Spacer(modifier = Modifier.width(8.dp))
+        val (label, tone) = when {
+            !p.settled -> "結果待ち" to Tone.NORMAL
+            p.won == true -> "的中 ${Fmt.signedYen((p.refund - 100).toDouble())}" to Tone.OK
+            else -> "外れ ${Fmt.signedYen(-100.0)}" to Tone.NORMAL
         }
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(color)
-                .padding(horizontal = 8.dp, vertical = 3.dp)
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-        }
+        ToneChip(text = label, tone = tone)
     }
 }
 
@@ -476,19 +486,18 @@ private fun NotificationLogSection() {
         }
     }
 
-    Card(
+    // 2026-10-23 UiKit：Card → Panel、見出し行は押せる高さ48dp以上
+    Panel(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            .padding(vertical = 4.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             // 見出し行（タップで開閉）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .clickable { expanded = !expanded },
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -534,7 +543,7 @@ private fun NotificationLogSection() {
                     if (logs.size > 100) {
                         Text(
                             text = "※ 直近100件のみ表示（最大300件まで保持）",
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -576,42 +585,35 @@ private fun SummaryHeader(
     // 的中率（結果確定レースが0のときは0%扱い）
     val rate = if (decidedCount > 0) (hitCount * 100 / decidedCount) else 0
 
-    Card(
+    // 2026-10-23 表示の決まり UiKit：主役の面（Panel emphasized）＋主役の数字（HeroStat）。
+    //  的中数を大きく、分母（確定レース数）を単位に添える
+    Panel(
+        emphasized = true,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "本日の的中 $hitCount / $decidedCount レース",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                // 取得中は進捗（m件中n件完了）を優先表示し、固まっていないことを伝える。
-                //  取得が終われば的中率＋最終取得時刻に切り替わる。
-                val subText = if (loading && totalCount > 0) {
-                    "取得中 ${totalCount}件中 ${processedCount}件完了（的中率 ${rate}%）"
-                } else {
-                    "的中率 ${rate}%" +
-                        (if (lastUpdated != null) "（最終取得 $lastUpdated）" else "")
-                }
-                Text(
-                    text = subText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+            // 取得中は進捗（m件中n件完了）を優先表示し、固まっていないことを伝える。
+            //  取得が終われば的中率＋最終取得時刻に切り替わる。
+            val subText = if (loading && totalCount > 0) {
+                "取得中 ${totalCount}件中 ${processedCount}件完了（的中率 ${rate}%）"
+            } else {
+                "的中率 ${rate}%" +
+                    (if (lastUpdated != null) "（最終取得 $lastUpdated）" else "")
             }
+            HeroStat(
+                label = "本日の的中",
+                value = hitCount.toString(),
+                unit = "/ ${decidedCount}レース",
+                sub = subText,
+                modifier = Modifier.weight(1f)
+            )
             Spacer(modifier = Modifier.width(8.dp))
             // 取得中はスピナー、そうでなければ更新ボタン
             if (loading) {
@@ -635,16 +637,9 @@ private fun ResultRowCard(row: ResultRow) {
     val race = row.race
     val result = row.result
 
-    // カード背景：的中=薄緑 / 不的中や結果待ち=標準
-    val containerColor = when (row.hit) {
-        true -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = containerColor)
-    ) {
+    // 2026-10-23 UiKit：影のある Card をやめ Panel（面）にする。
+    //  的中かどうかは右の札（HitBadge）だけで示し、カードの地は塗り分けない
+    Panel(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -716,7 +711,7 @@ private fun ActualOrderRow(first: Int, second: Int, third: Int, payout3t: Int?) 
         if (payout3t != null) {
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "3連単 ${"%,d".format(payout3t)}円",
+                text = "3連単 ${Fmt.yen(payout3t.toDouble())}",  // 例: 3連単 12,340円
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -735,44 +730,28 @@ private fun SmallLaneChip(lane: Int) {
             .size(20.dp)
             .clip(RoundedCornerShape(5.dp))
             .background(bg)
-            .border(1.dp, Color(0xFFBDBDBD), RoundedCornerShape(5.dp)),
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(5.dp)),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = lane.toString(),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,  // 12sp未満は使わない（2026-10-23 UiKit）
             fontWeight = FontWeight.Bold,
             color = textColor
         )
     }
 }
 
-// 的中バッジの色
-private val HitGreen = Color(0xFF2E7D32)   // 的中=緑
-private val MissGray = Color(0xFF757575)   // 不的中=灰
-
 /**
  * 的中バッジ。
- *  true = 「的中」緑 / false = 「不的中」灰 / null = 「結果待ち」薄いグレー。
+ *  true = 「的中」（良好の緑の札）/ false = 「不的中」・null = 「結果待ち」（通常の灰の札）。
+ * 2026-10-23 UiKit：色の直書きをやめ ToneChip にする（ダークでも白い板にならない）
  */
 @Composable
 private fun HitBadge(hit: Boolean?) {
-    val (label, bg, fg) = when (hit) {
-        true -> Triple("的中", HitGreen, Color.White)
-        false -> Triple("不的中", MissGray, Color.White)
-        null -> Triple("結果待ち", Color(0xFFE0E0E0), Color(0xFF616161))
-    }
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(bg)
-            .padding(horizontal = 10.dp, vertical = 4.dp)
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            color = fg
-        )
+    when (hit) {
+        true -> ToneChip(text = "的中", tone = Tone.OK)
+        false -> ToneChip(text = "不的中", tone = Tone.NORMAL)
+        null -> ToneChip(text = "結果待ち", tone = Tone.NORMAL)
     }
 }
