@@ -29,7 +29,8 @@ object ThemePrefs {
 
     // 配色の取得／保存
     fun getPalette(ctx: Context): String =
-        prefs(ctx).getString(KEY_PALETTE, DEFAULT_PALETTE) ?: DEFAULT_PALETTE
+        // 外した配色（2026-10-23 に11→3へ）を選んでいた人も、設定画面で正しく選択中が付くよう実在の id に直して返す
+        AppPalettes.byId(prefs(ctx).getString(KEY_PALETTE, DEFAULT_PALETTE)).id
     fun setPalette(ctx: Context, paletteId: String) {
         prefs(ctx).edit().putString(KEY_PALETTE, paletteId).apply()
     }

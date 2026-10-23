@@ -1,5 +1,11 @@
 package com.example.kyoteiai.ui.theme
 
+import android.app.Activity
+import android.graphics.drawable.ColorDrawable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -54,9 +60,25 @@ fun KyoteiAITheme(
     // 選択中の配色（AppPalettes）を取得し、明暗に応じて dark/light を使い分ける。
     // 旧 DarkColors/LightColors（緑固定）は未使用になったが参照用に残置。
     val palette = AppPalettes.byId(paletteId)
+    val scheme = if (useDark) palette.darkScheme else palette.lightScheme
+    // 明るい表示ではステータスバーの時計・電池のアイコンを濃い色に（白い地に白い文字が重なるのを防ぐ。2026-10-23）
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            val ctl = WindowCompat.getInsetsController(window, view)
+            ctl.isAppearanceLightStatusBars = !useDark
+            ctl.isAppearanceLightNavigationBars = !useDark
+            // 暗い表示で画面下のナビバーが明るい灰色の帯になっていた（窓の地が XML テーマの明るい色のまま、
+            // その上に OS が下敷きを敷く）。窓の地をテーマの背景色にし、OS の下敷きは切る
+            window.setBackgroundDrawable(ColorDrawable(scheme.background.toArgb()))
+            window.isNavigationBarContrastEnforced = false
+        }
+    }
     MaterialTheme(
-        colorScheme = if (useDark) palette.darkScheme else palette.lightScheme,
+        colorScheme = scheme,
         typography = Typography,
+        shapes = AppShapes,
         content = content
     )
 }
