@@ -49,6 +49,7 @@ import com.example.kyoteiai.data.BetRecord
 import com.example.kyoteiai.data.BetRepository
 import com.example.kyoteiai.data.EvPolicy
 import com.example.kyoteiai.data.RacePred
+import com.example.kyoteiai.ui.kit.HeaderDivider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -120,6 +121,8 @@ fun RaceDetailScreen(
                 ConfidenceBadge(topProb = race.topProb)
             }
         }
+        // 見出しと中身の境目の線（2026-10-24 ユーザー指示）
+        HeaderDivider()
 
         Column(
             modifier = Modifier

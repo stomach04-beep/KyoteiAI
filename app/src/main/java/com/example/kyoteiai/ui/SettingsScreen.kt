@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.example.kyoteiai.EvPickWorker
 import com.example.kyoteiai.HotRaceWorker
 import com.example.kyoteiai.SectionHeader
+import com.example.kyoteiai.ui.kit.HeaderDivider
 import com.example.kyoteiai.ui.theme.AppPalettes
 import com.example.kyoteiai.ui.theme.ThemePrefs
 
@@ -84,6 +85,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                 titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
             )
         )
+        // 見出しと中身の境目の線（2026-10-24 ユーザー指示）
+        HeaderDivider()
 
         Column(
             modifier = Modifier
