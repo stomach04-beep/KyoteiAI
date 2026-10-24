@@ -49,6 +49,7 @@ import com.example.kyoteiai.ui.kit.Fmt
 import com.example.kyoteiai.ui.kit.HeroStat
 import com.example.kyoteiai.ui.kit.InfoToggle
 import com.example.kyoteiai.ui.kit.Panel
+import com.example.kyoteiai.ui.kit.Sem
 import com.example.kyoteiai.ui.kit.Tone
 import com.example.kyoteiai.ui.kit.ToneChip
 import com.example.kyoteiai.ui.kit.num
@@ -243,8 +244,17 @@ private fun LedgerSection(ledger: LedgerUiState, resultRows: List<ResultRow>) {
 }
 
 /**
+ * 損益（円）の色の段階を決める唯一の判定。プラス（0円含む）＝良好の緑、マイナス＝危険の赤。
+ * 2026-10-24 ユーザー指示で手直し前の色分けに戻した（手直し前は profit >= 0 で緑／それ以外で赤）
+ */
+private fun profitTone(yen: Int): Tone = if (yen >= 0) Tone.OK else Tone.CRIT
+
+/** 回収率の損益分岐（%）。これ以上で緑にする（手直し前の「100%以上＝緑」） */
+private const val BREAK_EVEN_RATE = 100.0
+
+/**
  * 収支1行の表示。「ラベル 詳細 … 回収率XX%」。
- * 2026-10-23 UiKit：損益の方向に色を付けない決まりなので、100%以上の緑をやめ数字だけで示す
+ * 2026-10-24 ユーザー指示で手直し前の色分けに戻した（100%以上＝緑。100%未満は今の色のまま）
  */
 @Composable
 private fun LedgerLineView(label: String, detail: String, ratePercent: Double, hasData: Boolean) {
@@ -271,7 +281,9 @@ private fun LedgerLineView(label: String, detail: String, ratePercent: Double, h
             text = if (hasData) Fmt.withUnit(ratePercent, 1, "%") else Fmt.EMPTY,
             style = MaterialTheme.typography.titleSmall.num(),
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
+            // 100%以上＝緑（損益分岐超え）。データなし・100%未満は今の色
+            color = if (hasData && ratePercent >= BREAK_EVEN_RATE) Sem.fg(Tone.OK)
+                else MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.End,
             maxLines = 1
         )
@@ -400,11 +412,12 @@ private fun DayHistoryBlock(date: String, records: List<PickRecord>) {
         if (settled.isNotEmpty()) {
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                // 例: +110円 / −390円（損益は色でなく符号で示す。2026-10-23 UiKit）
+                // 例: +110円 / −390円。プラス緑・マイナス赤
+                //  （2026-10-24 ユーザー指示で手直し前の色分けに戻した）
                 text = Fmt.signedYen(profit.toDouble()),
                 style = MaterialTheme.typography.titleSmall.num(),
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = Sem.fg(profitTone(profit)),
                 maxLines = 1
             )
         }
@@ -455,14 +468,14 @@ private fun HistoryRowView(p: PickRecord) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        // 結果の札（±円）: 的中=+利益 / 外れ=−100円 / 結果待ち。
-        // 2026-10-23 UiKit：損は危険ではないので赤にしない。的中は「良好」の緑の札、
-        // 外れ・結果待ちは通常の灰の札。金額は符号つきの「円」にそろえる
+        // 結果の札（±円）: 的中=+利益（緑）/ 外れ=−100円（赤）/ 結果待ち（灰）。金額は符号つきの「円」にそろえる
+        // 2026-10-24 ユーザー指示で手直し前の色分けに戻した（外れの赤は 10-23 に一度灰にしていた）。
+        // 色は収支と同じ profitTone の1か所で決める
         Spacer(modifier = Modifier.width(8.dp))
         val (label, tone) = when {
             !p.settled -> "結果待ち" to Tone.NORMAL
-            p.won == true -> "的中 ${Fmt.signedYen((p.refund - 100).toDouble())}" to Tone.OK
-            else -> "外れ ${Fmt.signedYen(-100.0)}" to Tone.NORMAL
+            p.won == true -> "的中 ${Fmt.signedYen((p.refund - 100).toDouble())}" to profitTone(p.refund - 100)
+            else -> "外れ ${Fmt.signedYen(-100.0)}" to profitTone(-100)
         }
         ToneChip(text = label, tone = tone)
     }
