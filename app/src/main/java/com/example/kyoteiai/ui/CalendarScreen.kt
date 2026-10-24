@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.kyoteiai.ui.kit.HeaderDivider
 
 /**
  * 「カレンダー」タブ：本日開催の競艇場を一覧表示する。
@@ -48,6 +49,8 @@ fun CalendarScreen(state: FeedUiState) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        // 見出しと中身の境目の線（2026-10-24 ユーザー指示）
+        HeaderDivider()
 
         when {
             state.loading -> {

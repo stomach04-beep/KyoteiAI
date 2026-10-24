@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,18 +62,21 @@ import kotlin.math.abs
  * === 決まり ===
  *  1. 色は3つの役割に分ける
  *     ・良し悪し … Tone（危険=赤／警戒=橙／注意=黄／情報=青／良好=緑／通常=灰）だけで表す
- *     ・上げ下げ … 色を付けず ▲▼ の記号で表す（Fmt.change）。赤は「危険」専用
+ *     ・上げ下げ … ▲▼ の記号で表す（Fmt.change）。新しく作る画面では色を付けない。
+ *       ただし前から損益・前日比などを色分けしているアプリは、その色の向きのまま残す
+ *       （色は情報を伝える機能の一部。2026-10-24 ユーザー指示。消すなら利用者に聞く）
  *     ・合図（買い・点灯）… テーマの primary 1色（ここでは定義しない）
  *  2. 文字は4段：主役の数字 36sp（1画面に1つ・HeroStat）／見出し 18sp／本文 14sp／補足 12sp
  *  3. 数字は桁区切り・右寄せ・等幅（tnum）。円は「12,345円」、空欄は「—」1種類（Fmt）
  *  4. 説明文・凡例はふだん畳む（InfoToggle）
  *  5. 見た目の骨格（2026-10-23 追加・おしゃれ案）：影と区切り線を使わず、面の明るさ1段と
  *     すき間で分ける（Panel）。角丸は12dp。見出しは背景と同じ色の1段（ScreenHeader）。
+ *     例外：見出し（とすぐ下のタブの列）と中身の境目には1本の線を引く（HeaderDivider・2026-10-24 ユーザー指示）
  *     数字と英字だけ Inter（NumFont）。投資の一覧には1色の小さな推移グラフ（Sparkline）
  */
 
 // ═══════════════════════════════════════════════════════════════
-// 1. 色の意味（良し悪しだけ。上げ下げ・合図には使わない）
+// 1. 色の意味（良し悪し。前からある損益・前日比の色分けを残すときもここの色を使う）
 // ═══════════════════════════════════════════════════════════════
 
 /** 状態の「良し悪し」の段階。上から重い順 */
@@ -158,7 +162,7 @@ object Fmt {
     /** 符号つきの%（例: +0.56%） */
     fun pct(value: Double, decimals: Int = 2): String = if (value.isNaN()) EMPTY else signed(value, decimals) + "%"
 
-    /** 上げ下げ（色は付けず記号で示す。例: ▲215.30 / ▼12.40 / 変わらず） */
+    /** 上げ下げを記号つきの文字にする（例: ▲215.30 / ▼12.40 / 変わらず）。色は呼び出し側が決める（前からの色分けは残す） */
     fun change(delta: Double, decimals: Int): String = when {
         delta.isNaN() -> EMPTY
         delta > 0 -> "▲" + num(delta, decimals)
@@ -360,22 +364,27 @@ fun Panel(
 }
 
 /**
- * 画面の見出し（背景と同じ色の1段）。色の帯と TopAppBar を重ねる作りをやめるための部品。
+ * 画面の見出し（背景と同じ色の1段＋下に1本の線）。色の帯と TopAppBar を重ねる作りをやめるための部品。
+ * 2026-10-24 ユーザー指示「アプリ名など上の部分とそれ以降の境目がわかるように」で、下に区切りの線を足した
+ * （影と区切り線をやめた決まりの例外。見出しの色を変える案は、配色によって背景との差が出ず、
+ *  ステータスバーの下まで色を伸ばすにはアプリごとの直しが要るので採らなかった・Fable 相談）。
  *  ・title … アプリ名や画面名（20sp・太字）
  *  ・sub   … 更新時刻など（12sp・補足色）
  *  ・actions … 右端のボタン（更新など。アイコンボタンを置く）
+ *  ・divider … 下の線。すぐ下にタブの列があるときは false にし、タブの下の線を境目にする
  */
 @Composable
 fun ScreenHeader(
     title: String,
     modifier: Modifier = Modifier,
     sub: String? = null,
+    divider: Boolean = true,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
+    Column(modifier = modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
             .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -401,11 +410,24 @@ fun ScreenHeader(
         }
         actions()
     }
+    if (divider) HeaderDivider()
+    }
+}
+
+/**
+ * 見出しと中身の境目の線（1dp・横いっぱい）。ScreenHeader の下に自動で入る。
+ * TopAppBar の画面やタブの列の下など、ScreenHeader を使わない所でも同じ線を引くときに呼ぶ
+ * （タブの列は TabRow(divider = { HeaderDivider() }) で）。
+ * 色は補足の文字色を45%で敷いたもの。outlineVariant は配色ごとに濃さが違い、実機で「控えめすぎる」線だった
+ */
+@Composable
+fun HeaderDivider() {
+    HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
 }
 
 /**
  * 小さな推移グラフ（48×16dp・線1本・1色）。軸も目盛りも描かない。
- * 上げ下げで色を変えない（▲▼に色を付けない決まりと同じ）。点が2つ未満なら何も描かない。
+ * 線の色は上げ下げで変えない（新しく足した小さなグラフなので1色）。点が2つ未満なら何も描かない。
  *  ・values … 古い順の値
  */
 @Composable

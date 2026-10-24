@@ -34,9 +34,9 @@ android {
         //   狙い目レース通知は実際に出せたときだけ「通知済み」に記録する
         // v2.4（2026-10-23）表示の決まり UiKit を今日タブ・結果画面に適用（見た目だけ。計算は不変）
         // v2.5（2026-10-24）: 収支・回収率の色（プラス緑・マイナス赤）を手直し前の仕様に戻した（ユーザー指示）
-        versionCode = 11
-        versionName = "2.5"
-
+        versionCode = 12
+        // 2026-10-24 v2.6: 見出し（アプリ名など上の部分）と中身の境目に1本の線を入れた（ユーザー指示・機能は変更なし）
+        versionName = "2.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
