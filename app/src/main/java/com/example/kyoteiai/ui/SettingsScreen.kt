@@ -21,14 +21,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,7 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.example.kyoteiai.EvPickWorker
 import com.example.kyoteiai.HotRaceWorker
 import com.example.kyoteiai.SectionHeader
-import com.example.kyoteiai.ui.kit.HeaderDivider
+import com.example.kyoteiai.ui.kit.ScreenHeader
 import com.example.kyoteiai.ui.theme.AppPalettes
 import com.example.kyoteiai.ui.theme.ThemePrefs
 
@@ -51,7 +47,6 @@ import com.example.kyoteiai.ui.theme.ThemePrefs
  * 設定画面：狙い目通知のON/OFF・配色・テーマ（ライト/ダーク/システム）。
  * トグルが2個以上になるので HomeScreen とは分離した専用画面（feedback_android_settings_screen）。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -74,19 +69,9 @@ fun SettingsScreen(onBack: () -> Unit) {
     var hotNotifyEnabled by remember { mutableStateOf(prefs.getBoolean("hot_notify_enabled", false)) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // ヘッダー帯（BargainChecker 統一デザイン）
-        TopAppBar(
-            title = { Text("設定") },
-            navigationIcon = {
-                TextButton(onClick = onBack) { Text("戻る") }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-        )
-        // 見出しと中身の境目の線（2026-10-24 ユーザー指示）
-        HeaderDivider()
+        // 2026-10-25 APP_RULES.md A1・A5：色の帯の TopAppBar をやめ、歯車から開く1段深い画面の見出し
+        // （ScreenHeader＋戻る矢印。下の境目の線は ScreenHeader が引く）
+        ScreenHeader(title = "設定", onBack = onBack)
 
         Column(
             modifier = Modifier

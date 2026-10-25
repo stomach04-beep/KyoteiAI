@@ -11,6 +11,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.size
@@ -62,9 +69,9 @@ import kotlin.math.abs
  * === 決まり ===
  *  1. 色は3つの役割に分ける
  *     ・良し悪し … Tone（危険=赤／警戒=橙／注意=黄／情報=青／良好=緑／通常=灰）だけで表す
- *     ・上げ下げ … ▲▼ の記号で表す（Fmt.change）。新しく作る画面では色を付けない。
- *       ただし前から損益・前日比などを色分けしているアプリは、その色の向きのまま残す
- *       （色は情報を伝える機能の一部。2026-10-24 ユーザー指示。消すなら利用者に聞く）
+ *     ・上げ下げ … ▲▼ の記号（Fmt.change）＋色。＋＝赤、−＝青（日本の株価の板と同じ向き）。
+ *       色は Sem.sign(値) だけで塗る（アプリごとに色の関数を作らない。2026-10-25 利用者が確定。
+ *       正本 _shared\APP_RULES.md の B3）。危険の赤と見分けるため、危険は札や⚠の印＋文字で出す
  *     ・合図（買い・点灯）… テーマの primary 1色（ここでは定義しない）
  *  2. 文字は4段：主役の数字 36sp（1画面に1つ・HeroStat）／見出し 18sp／本文 14sp／補足 12sp
  *  3. 数字は桁区切り・右寄せ・等幅（tnum）。円は「12,345円」、空欄は「—」1種類（Fmt）
@@ -110,6 +117,54 @@ object Sem {
     /** 文字・点・線に使う色 */
     @Composable
     fun fg(tone: Tone): Color = (if (isDark()) DARK else LIGHT).getValue(tone)
+
+    /**
+     * 損益・前日比・増減の色（＋＝赤、−＝青、0・値なし＝補足色）。2026-10-25 APP_RULES.md B3。
+     * 赤・青は Tone.CRIT／Tone.INFO と同じ色（明暗それぞれで読める濃さを計算済みのもの）を使う。
+     * 表示の桁で丸めて 0 になる値は、呼ぶ側で丸めてから渡す（「+0.0%」が赤くならないように）
+     */
+    @Composable
+    fun sign(value: Double?): Color = when (val t = signTone(value)) {
+        Tone.NORMAL -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> fg(t)
+    }
+
+    /**
+     * ＋−の向きを Tone で返す（札 ToneChip や Sem.bg で地を塗るとき用。＋＝CRIT（赤）、−＝INFO（青）、0・値なし＝NORMAL）。
+     * 向きを決める所はここ1か所だけ（sign・signArgb もここを呼ぶ）
+     */
+    fun signTone(value: Double?): Tone = when {
+        value == null || value.isNaN() || value == 0.0 -> Tone.NORMAL
+        value > 0 -> Tone.CRIT
+        else -> Tone.INFO
+    }
+
+    /**
+     * ウィジェット（RemoteViews）用の ＋−の色（Composable の外で使える ARGB の Int）。
+     * @param dark ウィジェットの地が暗いか
+     */
+    fun signArgb(value: Double?, dark: Boolean, decimals: Int? = null): Int =
+        argb(signTone(if (decimals == null) value else roundShown(value, decimals)), dark)
+
+    /** 表示の桁（小数 decimals 桁）で丸めてから色を決める版。「▲0.00」「+0.0%」を赤や青にしない */
+    @Composable
+    fun sign(value: Double?, decimals: Int): Color = sign(roundShown(value, decimals))
+
+    /** 表示の桁で丸めた値（四捨五入。String.format と同じ丸め方） */
+    fun roundShown(value: Double?, decimals: Int): Double? =
+        if (value == null || value.isNaN() || value.isInfinite()) value
+        else java.math.BigDecimal(value).setScale(decimals, java.math.RoundingMode.HALF_UP).toDouble()
+
+    /** Tone の色を ARGB の Int で返す（ウィジェットなど Composable の外で使う） */
+    fun argb(tone: Tone, dark: Boolean): Int = (if (dark) DARK else LIGHT).getValue(tone).toArgb()
+
+    /** 整数版（円・件数の増減） */
+    @Composable
+    fun sign(value: Long?): Color = sign(value?.toDouble())
+
+    /** 整数版（Int。Kotlin は Int を Long? に自動では渡せないので別に置く） */
+    @Composable
+    fun sign(value: Int?): Color = sign(value?.toDouble())
 
     /** 札やカードの地の色（文字色を薄く敷いたもの。ダークでも白い板にならない） */
     @Composable
@@ -372,6 +427,8 @@ fun Panel(
  *  ・sub   … 更新時刻など（12sp・補足色）
  *  ・actions … 右端のボタン（更新など。アイコンボタンを置く）
  *  ・divider … 下の線。すぐ下にタブの列があるときは false にし、タブの下の線を境目にする
+ *  ・onBack … 設定画面など1段深い画面の「戻る」矢印（2026-10-25 APP_RULES.md A5。null なら出さない）。
+ *            端末の戻る操作は呼ぶ側の BackHandler で受ける
  */
 @Composable
 fun ScreenHeader(
@@ -379,15 +436,31 @@ fun ScreenHeader(
     modifier: Modifier = Modifier,
     sub: String? = null,
     divider: Boolean = true,
+    onBack: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 6.dp),
+            .padding(start = if (onBack != null) 4.dp else 16.dp, end = 4.dp, top = 12.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (onBack != null) {
+            // 矢印は線で描く（Material Icons を入れていないアプリが5本あり、UiKit から Icons を使うと配った先でビルドが落ちるため）
+            val arrowColor = MaterialTheme.colorScheme.onBackground
+            IconButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "戻る" }) {
+                Canvas(modifier = Modifier.size(24.dp)) {
+                    val u = size.width / 24f
+                    val stroke = Stroke(width = 2f * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    drawLine(arrowColor, Offset(19f * u, 12f * u), Offset(5f * u, 12f * u), strokeWidth = 2f * u, cap = StrokeCap.Round)
+                    val head = Path().apply {
+                        moveTo(11f * u, 6f * u); lineTo(5f * u, 12f * u); lineTo(11f * u, 18f * u)
+                    }
+                    drawPath(head, arrowColor, style = stroke)
+                }
+            }
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
@@ -423,6 +496,93 @@ fun ScreenHeader(
 @Composable
 fun HeaderDivider() {
     HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
+}
+
+/**
+ * 見出しのすぐ下の横タブの列（2026-10-25 APP_RULES.md A2）。地は背景と同じ色、下に境目の線。
+ * 見出しは ScreenHeader(divider = false) にして、線はこの列の下の1本だけにする。
+ * タブ名は全角4文字まで・2〜5枚（決まり A3）。横スワイプは呼ぶ側の HorizontalPager で受ける。
+ * 既存アプリで6枚以上残る場合だけ、文字を潰さないよう横に送れる列にする（新しいアプリでは作らない）
+ */
+@Composable
+fun ScreenTabs(titles: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    val tabs: @Composable () -> Unit = {
+        titles.forEachIndexed { i, t ->
+            Tab(
+                selected = selected == i,
+                onClick = { onSelect(i) },
+                text = { Text(t, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            )
+        }
+    }
+    if (titles.size <= 5) {
+        TabRow(
+            selectedTabIndex = selected,
+            containerColor = MaterialTheme.colorScheme.background,
+            divider = { HeaderDivider() },
+            tabs = tabs,
+        )
+    } else {
+        ScrollableTabRow(
+            selectedTabIndex = selected,
+            containerColor = MaterialTheme.colorScheme.background,
+            edgePadding = 8.dp,
+            divider = { HeaderDivider() },
+            tabs = tabs,
+        )
+    }
+}
+
+/**
+ * タブの中の先頭の細い行（更新時刻・件数などの一言＋右端のボタン）。
+ * 見出しはアプリで1つにし、タブごとの情報と操作はここに置く（2026-10-25 APP_RULES.md A2）
+ */
+@Composable
+fun TabInfoBar(text: String, modifier: Modifier = Modifier, actions: @Composable RowScope.() -> Unit = {}) {
+    Row(
+        modifier = modifier.fillMaxWidth().heightIn(min = 40.dp).padding(start = 16.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        actions()
+    }
+}
+
+/**
+ * 設定を開く歯車のボタン（見出しの右端に置く。2026-10-25 APP_RULES.md A5）。
+ * 歯車は線と円で描く（Material Icons を入れていないアプリが5本あり、UiKit から Icons を使うと配った先でビルドが落ちるため）
+ */
+@Composable
+fun GearButton(onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme.onBackground
+    IconButton(onClick = onClick, modifier = Modifier.semantics { contentDescription = "設定" }) {
+        Canvas(modifier = Modifier.size(24.dp)) {
+            val u = size.width / 24f
+            val center = Offset(12f * u, 12f * u)
+            // 歯を8本（中心から外へ太い線）
+            for (i in 0 until 8) {
+                val a = Math.toRadians(i * 45.0)
+                val dx = kotlin.math.cos(a).toFloat()
+                val dy = kotlin.math.sin(a).toFloat()
+                drawLine(
+                    c,
+                    Offset(center.x + dx * 6.5f * u, center.y + dy * 6.5f * u),
+                    Offset(center.x + dx * 9.5f * u, center.y + dy * 9.5f * u),
+                    strokeWidth = 3f * u,
+                    cap = StrokeCap.Butt,
+                )
+            }
+            // 本体の輪（中は空ける）
+            drawCircle(c, radius = 5.5f * u, center = center, style = Stroke(width = 2.6f * u))
+        }
+    }
 }
 
 /**

@@ -22,7 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.kyoteiai.ui.kit.HeaderDivider
+import com.example.kyoteiai.ui.kit.TabInfoBar
 
 /**
  * 「カレンダー」タブ：本日開催の競艇場を一覧表示する。
@@ -34,23 +34,12 @@ import com.example.kyoteiai.ui.kit.HeaderDivider
 fun CalendarScreen(state: FeedUiState) {
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // 見出し
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(
-                text = "本日の開催場",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            val dateLabel = state.feed?.date ?: ""
-            Text(
-                text = if (dateLabel.isEmpty()) "開催情報" else "$dateLabel の開催情報",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        // 見出しと中身の境目の線（2026-10-24 ユーザー指示）
-        HeaderDivider()
+        // 2026-10-25 APP_RULES.md A2：見出しはアプリ名＋横タブの1つにしたので、この画面の見出しと線は外し、
+        // 中身（本日の開催場・日付）はタブの中の先頭の細い行に移した（文言は残す）
+        val dateLabel = state.feed?.date ?: ""
+        TabInfoBar(
+            text = if (dateLabel.isEmpty()) "本日の開催場・開催情報" else "本日の開催場・$dateLabel の開催情報"
+        )
 
         when {
             state.loading -> {

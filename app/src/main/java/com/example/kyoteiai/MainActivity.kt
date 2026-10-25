@@ -5,21 +5,17 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,9 +25,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -44,8 +42,12 @@ import com.example.kyoteiai.ui.ResultScreen
 import com.example.kyoteiai.ui.ResultViewModel
 import com.example.kyoteiai.ui.SettingsScreen
 import com.example.kyoteiai.ui.TodayScreen
+import com.example.kyoteiai.ui.kit.GearButton
+import com.example.kyoteiai.ui.kit.ScreenHeader
+import com.example.kyoteiai.ui.kit.ScreenTabs
 import com.example.kyoteiai.ui.theme.KyoteiAITheme
 import com.example.kyoteiai.ui.theme.ThemePrefs
+import kotlinx.coroutines.launch
 
 // ───────────────────────────────────────────────────────────────
 // 共通UI部品：セクション見出し（SettingsScreen などから参照される）
@@ -70,7 +72,7 @@ fun SectionHeader(title: String, subtitle: String) {
 
 /**
  * メインActivity。
- * テーマ（明暗・配色）を購読し、下部3タブ＋レース詳細の画面遷移をホストする。
+ * テーマ（明暗・配色）を購読し、見出し下の横タブ3枚＋設定（歯車）＋レース詳細の画面遷移をホストする。
  */
 class MainActivity : ComponentActivity() {
 
@@ -146,12 +148,17 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// タブ（下部ナビ）の種類
-private enum class Tab { TODAY, RESULTS, CALENDAR, SETTINGS }
+// 主画面の横タブの名前（2026-10-25 APP_RULES.md A2・A5。下タブ 今日／結果／カレンダー／設定 から、設定を歯車へ移した）。
+// 並び順＝ページ番号（0=今日・1=結果・2=カレンダー）。タブ名の一覧はここ1か所だけ
+private val MAIN_TABS = listOf("今日", "結果", "カレンダー")
+
+// 結果タブのページ番号（開いたときに結果を取得する判定に使う）
+private const val PAGE_RESULTS = 1
 
 /**
  * 画面全体のルート。
- * 下部3タブ（今日・カレンダー・設定）＋「今日」からのレース詳細遷移を管理する。
+ * 見出し（アプリ名＋歯車）→横タブ3枚（今日・結果・カレンダー）→横スワイプで切り替わるページ、
+ * ＋歯車から開く設定画面と「今日」からのレース詳細遷移を管理する。
  * 詳細を開いている間は selectedRace を持ち、戻るで一覧へ復帰する。
  */
 @Composable
@@ -167,7 +174,11 @@ fun AppRoot(
     val resultVm: ResultViewModel = viewModel()
     val resultState by resultVm.uiState.collectAsState()
 
-    var tab by remember { mutableStateOf(Tab.TODAY) }
+    // ページの位置はここで覚える（設定やレース詳細から戻っても直前のタブのまま。2026-10-25 APP_RULES.md A5）
+    val pager = rememberPagerState(pageCount = { MAIN_TABS.size })
+    val scope = rememberCoroutineScope()
+    // 歯車から開く設定画面を表示中か
+    var showSettings by remember { mutableStateOf(false) }
     // 「狙い目のみ」トグルの状態（今日タブ用）
     var hotOnly by remember { mutableStateOf(false) }
     // レース詳細を開いている場合の対象レース（null=一覧）
@@ -217,66 +228,60 @@ fun AppRoot(
     //  feed が同じ内容で再emされるたびにキーが変わって LaunchedEffect が再発火し、
     //  loadResults が数秒おきに再起動→DNSを叩き続ける無限ロードになっていたため。
     //  日付は同一日なら安定なので、タブ切替や初回表示でだけ1回走る。
-    LaunchedEffect(tab, state.feed?.date) {
-        if (tab == Tab.RESULTS && state.feed != null) {
+    //  2026-10-25：タブの判定を「止まったページ」（settledPage）に置き換えた（取得の中身は従来どおり）。
+    //  currentPage だと「今日→カレンダー」の送りの途中で結果ページを通過しただけでも走るため
+    LaunchedEffect(pager.settledPage, state.feed?.date) {
+        if (pager.settledPage == PAGE_RESULTS && state.feed != null) {
             resultVm.loadResults(state.feed)
         }
     }
 
-    // edge-to-edge 対策：ルート全体にステータスバー分の上部余白を入れ、
-    // 各画面（今日/結果/カレンダー/設定）のヘッダが端末上部の
-    // ステータスバー（時計・通知アイコン）と重ならないようにする。
-    // 機種ごとのバー高さに自動追従するため固定dpではなく statusBarsPadding() を使う。
-    // 下部ナビ（NavigationBar）は Material3 が navigationBars インセットを
-    // 自動適用するので、ここでは上部インセットのみ消費する。
-    Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+    // 歯車から開く設定画面（1段深い画面。戻る矢印・端末の戻るで直前のタブへ。2026-10-25 APP_RULES.md A5）
+    //  端末の戻るは SettingsScreen の中の BackHandler が受けて onBack を呼ぶ
+    if (showSettings) {
+        Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
+            SettingsScreen(onBack = { showSettings = false })
+        }
+        return
+    }
+
+    // 最初のタブ以外で端末の戻るを押したら最初のタブ（今日）へ。今日タブでは従来どおりアプリを閉じる
+    BackHandler(enabled = pager.currentPage != 0) {
+        scope.launch { pager.animateScrollToPage(0) }
+    }
+
+    // edge-to-edge 対策：ルート全体に上下のシステムバー分の余白を入れ、
+    // 見出しが端末上部のステータスバー（時計・通知アイコン）と、
+    // 一番下の項目がナビゲーションバーと重ならないようにする。
+    // 以前は下部ナビ（NavigationBar）が下の余白を持っていたが、下タブをやめたので systemBarsPadding() にした。
+    // 機種ごとのバー高さに自動追従するため固定dpは使わない。
+    Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
+        // 見出し：アプリ名＋歯車（2026-10-25 APP_RULES.md A1・A2・A5。線は下の横タブの列が引く）
+        ScreenHeader(title = stringResource(R.string.app_name), divider = false) {
+            GearButton(onClick = { showSettings = true })
+        }
+        // 見出しのすぐ下の横タブ（押しても横スワイプでも移れる）
+        ScreenTabs(MAIN_TABS, pager.currentPage) { i ->
+            scope.launch { pager.animateScrollToPage(i) }
+        }
         // ── コンテンツ領域（残り全部） ─────────────────────────
-        Column(modifier = Modifier.weight(1f)) {
-            when (tab) {
-                Tab.TODAY -> TodayScreen(
+        HorizontalPager(state = pager, modifier = Modifier.weight(1f)) { page ->
+            when (page) {
+                0 -> TodayScreen(
                     state = state,
                     hotOnly = hotOnly,
                     onHotOnlyChange = { hotOnly = it },
                     // 一覧タップは従来どおり手動オッズ取得（自動取得は通知経由のみ）
                     onRaceClick = { autoFetchOdds = false; selectedRace = it }
                 )
-                Tab.RESULTS -> ResultScreen(
+                PAGE_RESULTS -> ResultScreen(
                     state = resultState,
                     feedLoaded = state.feed != null,
                     // 更新ボタンは force=true：取得中でも最新条件で走り直す
                     onRefresh = { resultVm.loadResults(state.feed, force = true) }
                 )
-                Tab.CALENDAR -> CalendarScreen(state = state)
-                Tab.SETTINGS -> SettingsScreen(onBack = { tab = Tab.TODAY })
+                else -> CalendarScreen(state = state)
             }
-        }
-
-        // ── 下部ナビゲーション（3タブ） ────────────────────────
-        NavigationBar {
-            NavigationBarItem(
-                selected = tab == Tab.TODAY,
-                onClick = { tab = Tab.TODAY },
-                icon = { Icon(Icons.Default.List, contentDescription = "今日") },
-                label = { Text("今日") }
-            )
-            NavigationBarItem(
-                selected = tab == Tab.RESULTS,
-                onClick = { tab = Tab.RESULTS },
-                icon = { Icon(Icons.Default.CheckCircle, contentDescription = "結果") },
-                label = { Text("結果") }
-            )
-            NavigationBarItem(
-                selected = tab == Tab.CALENDAR,
-                onClick = { tab = Tab.CALENDAR },
-                icon = { Icon(Icons.Default.DateRange, contentDescription = "カレンダー") },
-                label = { Text("カレンダー") }
-            )
-            NavigationBarItem(
-                selected = tab == Tab.SETTINGS,
-                onClick = { tab = Tab.SETTINGS },
-                icon = { Icon(Icons.Default.Settings, contentDescription = "設定") },
-                label = { Text("設定") }
-            )
         }
     }
 }
