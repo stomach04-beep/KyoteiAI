@@ -1,6 +1,7 @@
 package com.example.kyoteiai.ui.kit
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -79,6 +80,7 @@ import kotlin.math.abs
  *  5. 見た目の骨格（2026-10-23 追加・おしゃれ案）：影と区切り線を使わず、面の明るさ1段と
  *     すき間で分ける（Panel）。角丸は12dp。見出しは背景と同じ色の1段（ScreenHeader）。
  *     例外：見出し（とすぐ下のタブの列）と中身の境目には1本の線を引く（HeaderDivider・2026-10-24 ユーザー指示）
+ *     例外2：Panel には細い枠線（1dp・補足色45%）を引く（2026-10-28。面の明るさの差だけでは境目が見えなかった）
  *     数字と英字だけ Inter（NumFont）。投資の一覧には1色の小さな推移グラフ（Sparkline）
  */
 
@@ -398,23 +400,38 @@ fun InfoToggle(
 /** 角丸の大きさ（全アプリ共通。札だけは丸く RoundedCornerShape(50)） */
 val PanelShape = RoundedCornerShape(12.dp)
 
+/** Panel の枠線の太さ（2026-10-28 追加。全アプリ共通。太さを変えるときはここ1か所だけ直して配り直す） */
+val PanelBorderWidth = 1.dp
+
 /**
- * 面のカード。影も枠線も付けず、背景より1段明るい（ダークでは1段明るい／ライトでは白い）面で区切る。
+ * Panel の枠線の色。補足の文字色を45%で敷いたもの（HeaderDivider と同じ濃さ）。
+ * 2026-10-28 追加：背景と面の明るさの差は配色によって約1.1倍しかなく、生活タスクボードで
+ * 「各タスクの枠と境目がわかりにくい」と指摘されたため。primary（合図の色）や Tone の色は枠に使わない
+ */
+@Composable
+fun panelBorderColor(): Color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+
+/**
+ * 面のカード。影は付けず、背景より1段明るい（ダークでは1段明るい／ライトでは白い）面と細い枠線で区切る。
  * 一覧はこれを 6〜8dp のすき間で縦に並べる（行と行の間に区切り線を引かない）。
  *  ・emphasized … 主役の数字など1画面に1つだけ目立たせる面（もう1段明るい surfaceVariant）
+ *  ・bordered … 枠線を引くか（既定：ふつうの面は引く／主役の面は面の明るさで分かるので引かない）。
+ *    Panel の中に Panel を入れるときや、ダイアログ・下から出る板の中では内側を bordered = false にする
  */
 @Composable
 fun Panel(
     modifier: Modifier = Modifier,
     emphasized: Boolean = false,
+    bordered: Boolean = !emphasized,
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val color = if (emphasized) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
+    val border = if (bordered) BorderStroke(PanelBorderWidth, panelBorderColor()) else null
     if (onClick != null) {
-        Surface(onClick = onClick, modifier = modifier, shape = PanelShape, color = color, content = content)
+        Surface(onClick = onClick, modifier = modifier, shape = PanelShape, color = color, border = border, content = content)
     } else {
-        Surface(modifier = modifier, shape = PanelShape, color = color, content = content)
+        Surface(modifier = modifier, shape = PanelShape, color = color, border = border, content = content)
     }
 }
 
