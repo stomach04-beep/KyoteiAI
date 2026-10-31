@@ -43,6 +43,9 @@ import com.example.kyoteiai.ui.ResultViewModel
 import com.example.kyoteiai.ui.SettingsScreen
 import com.example.kyoteiai.ui.TodayScreen
 import com.example.kyoteiai.ui.kit.GearButton
+import com.example.kyoteiai.ui.kit.HeaderAppIcon
+import com.example.kyoteiai.ui.kit.HeaderBackdrop
+import androidx.compose.ui.res.painterResource
 import com.example.kyoteiai.ui.kit.ScreenHeader
 import com.example.kyoteiai.ui.kit.ScreenTabs
 import com.example.kyoteiai.ui.theme.KyoteiAITheme
@@ -257,12 +260,21 @@ fun AppRoot(
     // 機種ごとのバー高さに自動追従するため固定dpは使わない。
     Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
         // 見出し：アプリ名＋歯車（2026-10-25 APP_RULES.md A1・A2・A5。線は下の横タブの列が引く）
-        ScreenHeader(title = stringResource(R.string.app_name), divider = false) {
-            GearButton(onClick = { showSettings = true })
-        }
-        // 見出しのすぐ下の横タブ（押しても横スワイプでも移れる）
-        ScreenTabs(MAIN_TABS, pager.currentPage) { i ->
-            scope.launch { pager.animateScrollToPage(i) }
+        // 見出しとタブの後ろに Gemini で描いた絵を敷く（2026-11-01 案3-3）
+        HeaderBackdrop(art = painterResource(R.drawable.header_backdrop)) {
+            ScreenHeader(
+                title = stringResource(R.string.app_name),
+                divider = false,
+                // 名前の左にアプリアイコン。絵の上に置くので見出し自身の背景は塗らない
+                leading = { HeaderAppIcon(painterResource(R.mipmap.ic_launcher)) },
+                transparent = true,
+            ) {
+                GearButton(onClick = { showSettings = true })
+            }
+            // 見出しのすぐ下の横タブ（押しても横スワイプでも移れる）
+            ScreenTabs(MAIN_TABS, pager.currentPage, transparent = true) { i ->
+                scope.launch { pager.animateScrollToPage(i) }
+            }
         }
         // ── コンテンツ領域（残り全部） ─────────────────────────
         HorizontalPager(state = pager, modifier = Modifier.weight(1f)) { page ->
