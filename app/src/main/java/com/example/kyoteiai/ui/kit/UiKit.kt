@@ -2,7 +2,20 @@ package com.example.kyoteiai.ui.kit
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -446,6 +460,9 @@ fun Panel(
  *  ・divider … 下の線。すぐ下にタブの列があるときは false にし、タブの下の線を境目にする
  *  ・onBack … 設定画面など1段深い画面の「戻る」矢印（2026-10-25 APP_RULES.md A5。null なら出さない）。
  *            端末の戻る操作は呼ぶ側の BackHandler で受ける
+ *  ・leading … 名前の左に置くもの（2026-11-01 追加。アプリアイコンは HeaderAppIcon で渡す。
+ *             UiKit からはアプリの R.mipmap を引けないので、呼ぶ側が中身を渡す）
+ *  ・transparent … true で自分の背景を塗らない（HeaderBackdrop の絵の上に置くとき。2026-11-01 追加）
  */
 @Composable
 fun ScreenHeader(
@@ -454,9 +471,12 @@ fun ScreenHeader(
     sub: String? = null,
     divider: Boolean = true,
     onBack: (() -> Unit)? = null,
+    leading: (@Composable () -> Unit)? = null,
+    transparent: Boolean = false,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    Column(modifier = modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
+    val bg = if (transparent) Color.Transparent else MaterialTheme.colorScheme.background
+    Column(modifier = modifier.fillMaxWidth().background(bg)) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -478,15 +498,26 @@ fun ScreenHeader(
                 }
             }
         }
+        if (leading != null) {
+            // アプリアイコンなど。名前との間は12dp
+            leading()
+            Spacer(Modifier.width(12.dp))
+        }
         Column(modifier = Modifier.weight(1f)) {
+            // 名前が1行に収まらないときは 20sp から 1sp ずつ縮める（16sp まで。それでも長ければ…で切る）。
+            // 2026-11-01：左にアプリアイコンを置くと「AutoTrader Vesper」が切れたため
+            var titleSize by remember(title) { mutableStateOf(20f) }
             Text(
                 text = title,
-                fontSize = 20.sp,
+                fontSize = titleSize.sp,
                 lineHeight = 26.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                onTextLayout = { r ->
+                    if ((r.hasVisualOverflow || r.isLineEllipsized(0)) && titleSize > 16f) titleSize -= 1f
+                },
             )
             if (!sub.isNullOrBlank()) {
                 Text(
@@ -516,13 +547,83 @@ fun HeaderDivider() {
 }
 
 /**
+ * 見出しとタブの列の後ろに、アプリごとの絵（Gemini で描いた横長の背景）を敷く入れ物（2026-11-01 追加・案3-3）。
+ * 中に ScreenHeader(transparent = true) と ScreenTabs(transparent = true) を縦に並べて使う。
+ *  ・art … 背景の絵（res/drawable-nodpi/header_backdrop.png など）。null なら背景色だけ
+ * 絵は右に寄せ、文字のある左側と下の境目に向かって背景色へ溶かす（文字が読めるように・境目の線は残る）。
+ * 絵は暗い配色向けに描いてあるので、明るい配色のときは出さない（明るい地に暗い絵はにじみに見える）。
+ * 絵の色は飾りで、赤＝危険・緑＝完了・primary＝合図 の意味の色とは別物（文字や札には使わない）
+ */
+@Composable
+fun HeaderBackdrop(
+    art: Painter?,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val bg = MaterialTheme.colorScheme.background
+    Box(modifier = modifier.fillMaxWidth().background(bg)) {
+        if (art != null && bg.luminance() < 0.5f) {
+            Image(
+                painter = art,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.CenterEnd,
+                modifier = Modifier
+                    .matchParentSize()
+                    // 溶かす処理（DstIn）は、絵だけを別の層に描いてから効かせる
+                    .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen, alpha = 0.85f)
+                    .drawWithContent {
+                        drawContent()
+                        // 左3割は消し、右へ向かって濃くする
+                        drawRect(
+                            Brush.horizontalGradient(0.28f to Color.Transparent, 0.78f to Color.Black),
+                            blendMode = BlendMode.DstIn,
+                        )
+                        // 上端と下端（タブの下の線のあたり）を溶かす
+                        drawRect(
+                            Brush.verticalGradient(0f to Color.Transparent, 0.12f to Color.Black, 0.6f to Color.Black, 1f to Color.Transparent),
+                            blendMode = BlendMode.DstIn,
+                        )
+                    },
+            )
+        }
+        Column(modifier = Modifier.fillMaxWidth(), content = content)
+    }
+}
+
+/**
+ * 見出しの左に置くアプリアイコン（36dp・角丸10dp・細い縁取り）。2026-11-01 追加・案3。
+ * 呼ぶ側で ScreenHeader(leading = { HeaderAppIcon(painterResource(R.mipmap.ic_launcher)) }) と渡す
+ */
+@Composable
+fun HeaderAppIcon(icon: Painter) {
+    val shape = RoundedCornerShape(10.dp)
+    Image(
+        painter = icon,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(36.dp)
+            .clip(shape)
+            .border(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.18f), shape),
+    )
+}
+
+/**
  * 見出しのすぐ下の横タブの列（2026-10-25 APP_RULES.md A2）。地は背景と同じ色、下に境目の線。
  * 見出しは ScreenHeader(divider = false) にして、線はこの列の下の1本だけにする。
  * タブ名は全角4文字まで・2〜5枚（決まり A3）。横スワイプは呼ぶ側の HorizontalPager で受ける。
  * 既存アプリで6枚以上残る場合だけ、文字を潰さないよう横に送れる列にする（新しいアプリでは作らない）
  */
 @Composable
-fun ScreenTabs(titles: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+fun ScreenTabs(
+    titles: List<String>,
+    selected: Int,
+    // true で列の背景を塗らない（HeaderBackdrop の絵の上に置くとき。2026-11-01 追加）
+    transparent: Boolean = false,
+    onSelect: (Int) -> Unit,
+) {
+    val container = if (transparent) Color.Transparent else MaterialTheme.colorScheme.background
     val tabs: @Composable () -> Unit = {
         titles.forEachIndexed { i, t ->
             Tab(
@@ -535,14 +636,14 @@ fun ScreenTabs(titles: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     if (titles.size <= 5) {
         TabRow(
             selectedTabIndex = selected,
-            containerColor = MaterialTheme.colorScheme.background,
+            containerColor = container,
             divider = { HeaderDivider() },
             tabs = tabs,
         )
     } else {
         ScrollableTabRow(
             selectedTabIndex = selected,
-            containerColor = MaterialTheme.colorScheme.background,
+            containerColor = container,
             edgePadding = 8.dp,
             divider = { HeaderDivider() },
             tabs = tabs,

@@ -34,10 +34,11 @@ android {
         //   狙い目レース通知は実際に出せたときだけ「通知済み」に記録する
         // v2.4（2026-10-23）表示の決まり UiKit を今日タブ・結果画面に適用（見た目だけ。計算は不変）
         // v2.5（2026-10-24）: 収支・回収率の色（プラス緑・マイナス赤）を手直し前の仕様に戻した（ユーザー指示）
-        versionCode = 14
+        versionCode = 15
         // 2026-10-24 v2.6: 見出し（アプリ名など上の部分）と中身の境目に1本の線を入れた（ユーザー指示・機能は変更なし）
         // 2026-10-25 v2.7: 下タブをやめ見出し下の横タブ（今日／結果／カレンダー・横スワイプ可）＋設定は歯車に。収支の色を＋赤・−青に（APP_RULES.md A2・A5・B3）
-        versionName = "2.8"
+        // 2026-11-01 v2.9: 見出しの左にアプリアイコン、見出しとタブの後ろに Gemini で描いた絵を敷いた（案3-3・UiKit の HeaderBackdrop／HeaderAppIcon）
+        versionName = "2.9"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
