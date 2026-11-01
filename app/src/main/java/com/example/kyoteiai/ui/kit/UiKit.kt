@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
@@ -509,8 +511,9 @@ fun ScreenHeader(
             Spacer(Modifier.width(12.dp))
         }
         Column(modifier = Modifier.weight(1f)) {
-            // 名前が1行に収まらないときは 20sp から 1sp ずつ縮める（16sp まで。それでも長ければ…で切る）。
-            // 2026-11-01：左にアプリアイコンを置くと「AutoTrader Vesper」が切れたため
+            // 名前が1行に収まらないときは 20sp から 1sp ずつ縮める（HeaderTitleMinSp まで。それでも長ければ…で切る）。
+            // 2026-11-01：左にアプリアイコンを置くと「AutoTrader Vesper」が切れたため。
+            // 右のボタンが3つある AppManager は 16sp でも「アプリマネージ…」と切れたので、下限を 13sp に下げた（ユーザー指示「名前が消えるのを防いで」）
             var titleSize by remember(title) { mutableStateOf(20f) }
             Text(
                 text = title,
@@ -521,7 +524,7 @@ fun ScreenHeader(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 onTextLayout = { r ->
-                    if ((r.hasVisualOverflow || r.isLineEllipsized(0)) && titleSize > 16f) titleSize -= 1f
+                    if ((r.hasVisualOverflow || r.isLineEllipsized(0)) && titleSize > HeaderTitleMinSp) titleSize -= 1f
                 },
             )
             if (!sub.isNullOrBlank()) {
@@ -576,6 +579,9 @@ fun HeaderDivider() {
  */
 const val HeaderTabScrimAlpha = 0.3f
 
+/** 見出しの名前を縮めるときの下限（sp）。決まり C1「12sp 未満は使わない」の内側で 13sp（2026-11-01） */
+const val HeaderTitleMinSp = 13f
+
 /** HeaderBackdrop の中がこの高さを超えたら「下にタブの列がある」とみなす（見出しの段だけなら約60〜80dp）。2026-11-01 */
 val HeaderBackdropTabsMinHeight = 96.dp
 
@@ -593,20 +599,42 @@ val HeaderBackdropActionsWidth = 56.dp
  * 中に ScreenHeader(transparent = true) と ScreenTabs(transparent = true) を縦に並べて使う。
  *  ・art … 背景の絵（res/drawable-nodpi/header_backdrop.png など）。null なら背景色だけ
  *  ・artOffsetY … 絵を上下にずらす量（＋で下、−で上）。絵の主役の位置がアプリごとに違うときの微調整（2026-11-01 追加）
+ *  ・artEndPadding … 絵を右端からこの幅だけ手前（左）に寄せる。右上のボタンが多くて主役がかぶるアプリ用（null＝既定）
+ *  ・artLift … タブがあるとき絵の下端を上に詰める量（null＝既定 HeaderBackdropTabsLift）。0 にすると絵がタブの下端まで来て大きくなる
  * 絵は右に寄せ、文字のある左側と下の境目に向かって背景色へ溶かす（文字が読めるように・境目の線は残る）。
- * 絵は暗い配色向けに描いてあるので、明るい配色のときは出さない（明るい地に暗い絵はにじみに見える）。
- * 絵の色は飾りで、赤＝危険・緑＝完了・primary＝合図 の意味の色とは別物（文字や札には使わない）
+ * 絵は暗い配色向けに描いてあるので、明るい配色のときはそのまま敷かず（明るい地に暗い絵はにじみに見える）、
+ * 絵の明るさを濃さに変えて primary 1色で塗った「透かし模様」にする（暗い地は透明・光る線や形だけ残る）。
+ * 2026-11-01 ユーザーが案L2（メインの色1色）を選択。primary は合図の色でもあるが、透かしは薄い飾りで文字や札には使わない
  */
 @Composable
 fun HeaderBackdrop(
     art: Painter?,
     modifier: Modifier = Modifier,
     artOffsetY: Dp = 0.dp,
+    artEndPadding: Dp? = null,
+    artLift: Dp? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val bg = MaterialTheme.colorScheme.background
+    // 明るい配色のときだけ、絵を primary 1色の透かし模様に変える色の変換。
+    // 透明度＝(明るさ − 35) × 1.7（0〜255 で頭打ち）、色＝primary。暗い地は透明になり、光る線や形だけが残る
+    val primary = MaterialTheme.colorScheme.primary
+    val lightFilter = if (bg.luminance() >= 0.5f) {
+        ColorFilter.colorMatrix(
+            ColorMatrix(
+                floatArrayOf(
+                    0f, 0f, 0f, 0f, primary.red * 255f,
+                    0f, 0f, 0f, 0f, primary.green * 255f,
+                    0f, 0f, 0f, 0f, primary.blue * 255f,
+                    0.51f, 1.003f, 0.187f, 0f, -59.5f,
+                )
+            )
+        )
+    } else {
+        null
+    }
     Box(modifier = modifier.fillMaxWidth().background(bg)) {
-        if (art != null && bg.luminance() < 0.5f) {
+        if (art != null) {
             // ずらした絵が見出しの外（状態バー側）へはみ出さないよう、入れ物の範囲で切る
             BoxWithConstraints(Modifier.matchParentSize().clipToBounds()) {
                 // 中の高さが HeaderBackdropTabsMinHeight を超えるときは、見出しの下にタブの列がある。
@@ -614,25 +642,28 @@ fun HeaderBackdrop(
                 // （2026-11-01 ユーザー指示「タブと大きく被っているものは小さくするか上に調整」。例 NotiSweeper。
                 //  タブの高さぶん詰めたら上に行きすぎたので、修正前との中間＝半分にした）
                 val withTabs = maxHeight > HeaderBackdropTabsMinHeight
-                val artHeight = if (withTabs) maxHeight - HeaderBackdropTabsLift else maxHeight
+                val artHeight = if (withTabs) maxHeight - (artLift ?: HeaderBackdropTabsLift) else maxHeight
+                // 右端から手前へ寄せる幅。指定があればそれ、無ければタブがあるときだけ歯車の幅ぶん
+                val endPad = artEndPadding ?: if (withTabs) HeaderBackdropActionsWidth else 0.dp
                 Image(
                     painter = art,
                     contentDescription = null,
                     contentScale = if (withTabs) ContentScale.FillHeight else ContentScale.Crop,
                     alignment = Alignment.CenterEnd,
+                    colorFilter = lightFilter,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(artHeight)
                         .offset(y = artOffsetY)
                         // 縮めた絵は右端の歯車の真後ろに隠れるので、歯車の幅ぶん手前（左）へ寄せる
-                        .padding(end = if (withTabs) HeaderBackdropActionsWidth else 0.dp)
+                        .padding(end = endPad)
                         // 溶かす処理（DstIn）は、絵だけを別の層に描いてから効かせる
                         .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen, alpha = 0.85f)
                         .drawWithContent {
                             drawContent()
                             // 左3割は消し、右へ向かって濃くする（手前へ寄せたときは右端も短く溶かして切れ目を見せない）
                             drawRect(
-                                if (withTabs) Brush.horizontalGradient(0.28f to Color.Transparent, 0.78f to Color.Black, 0.93f to Color.Black, 1f to Color.Transparent)
+                                if (endPad > 0.dp) Brush.horizontalGradient(0.28f to Color.Transparent, 0.78f to Color.Black, 0.93f to Color.Black, 1f to Color.Transparent)
                                 else Brush.horizontalGradient(0.28f to Color.Transparent, 0.78f to Color.Black),
                                 blendMode = BlendMode.DstIn,
                             )
