@@ -260,8 +260,9 @@ fun AppRoot(
     // 機種ごとのバー高さに自動追従するため固定dpは使わない。
     Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
         // 見出し：アプリ名＋歯車（2026-10-25 APP_RULES.md A1・A2・A5。線は下の横タブの列が引く）
-        // 見出しとタブの後ろに Gemini で描いた絵を敷く（2026-11-01 案3-3）
-        HeaderBackdrop(art = painterResource(R.drawable.header_backdrop)) {
+        // 見出しとタブの後ろに Gemini で描いた絵を敷く（2026-11-01 案3-3）。
+        // ボートの絵が上寄りなので、少し下へずらす（2026-11-01 ユーザー指示）
+        HeaderBackdrop(art = painterResource(R.drawable.header_backdrop), artOffsetY = 8.dp) {
             ScreenHeader(
                 title = stringResource(R.string.app_name),
                 divider = false,
