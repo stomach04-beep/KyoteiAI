@@ -6,9 +6,14 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -529,7 +534,24 @@ fun ScreenHeader(
                 )
             }
         }
-        actions()
+        if (transparent) {
+            // 絵の上に置くときは、右端のボタン（歯車・更新など）の後ろに背景色をぼかして敷き、絵を沈める
+            // （2026-11-01 ユーザー指示「歯車ボタンなどもかぶっていたら調整」）
+            val scrim = MaterialTheme.colorScheme.background
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.drawBehind {
+                    val r = size.maxDimension * 0.85f
+                    drawCircle(
+                        Brush.radialGradient(listOf(scrim.copy(alpha = 0.88f), scrim.copy(alpha = 0.6f), Color.Transparent), center = center, radius = r),
+                        radius = r,
+                        center = center,
+                    )
+                },
+            ) { actions() }
+        } else {
+            actions()
+        }
     }
     if (divider) HeaderDivider()
     }
@@ -547,9 +569,30 @@ fun HeaderDivider() {
 }
 
 /**
+ * HeaderBackdrop の絵の上に置くタブの列に敷く、背景色の濃さ（2026-11-01）。
+ * 自前の TabRow を使うアプリも containerColor = background.copy(alpha = HeaderTabScrimAlpha) でこの値を使う。
+ * 0.72 では重なった絵がほとんど見えなかったので、ユーザー指示「かかっている部分をもう少し見えるように」で 0.5、
+ * さらに「もっと透明度をあげて」で 0.3 にした（2026-11-01）
+ */
+const val HeaderTabScrimAlpha = 0.3f
+
+/** HeaderBackdrop の中がこの高さを超えたら「下にタブの列がある」とみなす（見出しの段だけなら約60〜80dp）。2026-11-01 */
+val HeaderBackdropTabsMinHeight = 96.dp
+
+/**
+ * タブがあるとき、絵の下端を上に詰める量（2026-11-01）。
+ * タブの列の高さ（48dp）ぶん詰めると上に寄りすぎたので、ユーザー指示で半分（24dp）にした＝絵はタブの列の上半分まで下がる
+ */
+val HeaderBackdropTabsLift = 24.dp
+
+/** 見出しの右端のボタン（歯車1つ＋余白）の幅。タブがあるとき、縮めた絵をこのぶん手前に寄せる。2026-11-01 */
+val HeaderBackdropActionsWidth = 56.dp
+
+/**
  * 見出しとタブの列の後ろに、アプリごとの絵（Gemini で描いた横長の背景）を敷く入れ物（2026-11-01 追加・案3-3）。
  * 中に ScreenHeader(transparent = true) と ScreenTabs(transparent = true) を縦に並べて使う。
  *  ・art … 背景の絵（res/drawable-nodpi/header_backdrop.png など）。null なら背景色だけ
+ *  ・artOffsetY … 絵を上下にずらす量（＋で下、−で上）。絵の主役の位置がアプリごとに違うときの微調整（2026-11-01 追加）
  * 絵は右に寄せ、文字のある左側と下の境目に向かって背景色へ溶かす（文字が読めるように・境目の線は残る）。
  * 絵は暗い配色向けに描いてあるので、明るい配色のときは出さない（明るい地に暗い絵はにじみに見える）。
  * 絵の色は飾りで、赤＝危険・緑＝完了・primary＝合図 の意味の色とは別物（文字や札には使わない）
@@ -558,34 +601,56 @@ fun HeaderDivider() {
 fun HeaderBackdrop(
     art: Painter?,
     modifier: Modifier = Modifier,
+    artOffsetY: Dp = 0.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val bg = MaterialTheme.colorScheme.background
     Box(modifier = modifier.fillMaxWidth().background(bg)) {
         if (art != null && bg.luminance() < 0.5f) {
-            Image(
-                painter = art,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                alignment = Alignment.CenterEnd,
-                modifier = Modifier
-                    .matchParentSize()
-                    // 溶かす処理（DstIn）は、絵だけを別の層に描いてから効かせる
-                    .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen, alpha = 0.85f)
-                    .drawWithContent {
-                        drawContent()
-                        // 左3割は消し、右へ向かって濃くする
-                        drawRect(
-                            Brush.horizontalGradient(0.28f to Color.Transparent, 0.78f to Color.Black),
-                            blendMode = BlendMode.DstIn,
-                        )
-                        // 上端と下端（タブの下の線のあたり）を溶かす
-                        drawRect(
-                            Brush.verticalGradient(0f to Color.Transparent, 0.12f to Color.Black, 0.6f to Color.Black, 1f to Color.Transparent),
-                            blendMode = BlendMode.DstIn,
-                        )
-                    },
-            )
+            // ずらした絵が見出しの外（状態バー側）へはみ出さないよう、入れ物の範囲で切る
+            BoxWithConstraints(Modifier.matchParentSize().clipToBounds()) {
+                // 中の高さが HeaderBackdropTabsMinHeight を超えるときは、見出しの下にタブの列がある。
+                // そのときは絵の下端を HeaderBackdropTabsLift だけ上に詰め、高さに合わせて縮めて右に寄せる
+                // （2026-11-01 ユーザー指示「タブと大きく被っているものは小さくするか上に調整」。例 NotiSweeper。
+                //  タブの高さぶん詰めたら上に行きすぎたので、修正前との中間＝半分にした）
+                val withTabs = maxHeight > HeaderBackdropTabsMinHeight
+                val artHeight = if (withTabs) maxHeight - HeaderBackdropTabsLift else maxHeight
+                Image(
+                    painter = art,
+                    contentDescription = null,
+                    contentScale = if (withTabs) ContentScale.FillHeight else ContentScale.Crop,
+                    alignment = Alignment.CenterEnd,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(artHeight)
+                        .offset(y = artOffsetY)
+                        // 縮めた絵は右端の歯車の真後ろに隠れるので、歯車の幅ぶん手前（左）へ寄せる
+                        .padding(end = if (withTabs) HeaderBackdropActionsWidth else 0.dp)
+                        // 溶かす処理（DstIn）は、絵だけを別の層に描いてから効かせる
+                        .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen, alpha = 0.85f)
+                        .drawWithContent {
+                            drawContent()
+                            // 左3割は消し、右へ向かって濃くする（手前へ寄せたときは右端も短く溶かして切れ目を見せない）
+                            drawRect(
+                                if (withTabs) Brush.horizontalGradient(0.28f to Color.Transparent, 0.78f to Color.Black, 0.93f to Color.Black, 1f to Color.Transparent)
+                                else Brush.horizontalGradient(0.28f to Color.Transparent, 0.78f to Color.Black),
+                                blendMode = BlendMode.DstIn,
+                            )
+                            // 上端と下端を溶かす。タブがあるときは、タブと重なる下の部分を下に行くほど段階的に透明にする。
+                            // 薄くしすぎて絵が見えなかったので、ユーザー指示「かかっている部分をもう少し見えるように」で下端まで少し残す
+                            val vertical = if (withTabs) {
+                                Brush.verticalGradient(
+                                    0f to Color.Transparent, 0.12f to Color.Black, 0.6f to Color.Black,
+                                    // 「もっと透明度をあげて」（2026-11-01）で下の部分の消え方をさらにゆるめ、下端も3割残す
+                                    0.75f to Color.Black.copy(alpha = 0.85f), 0.9f to Color.Black.copy(alpha = 0.6f), 1f to Color.Black.copy(alpha = 0.3f),
+                                )
+                            } else {
+                                Brush.verticalGradient(0f to Color.Transparent, 0.12f to Color.Black, 0.6f to Color.Black, 1f to Color.Transparent)
+                            }
+                            drawRect(vertical, blendMode = BlendMode.DstIn)
+                        },
+                )
+            }
         }
         Column(modifier = Modifier.fillMaxWidth(), content = content)
     }
@@ -619,11 +684,12 @@ fun HeaderAppIcon(icon: Painter) {
 fun ScreenTabs(
     titles: List<String>,
     selected: Int,
-    // true で列の背景を塗らない（HeaderBackdrop の絵の上に置くとき。2026-11-01 追加）
+    // true で列の背景を半透明にする（HeaderBackdrop の絵の上に置くとき。2026-11-01 追加）。
+    // 全く塗らないとタブの文字の後ろに絵が来て読みにくいので、背景色を7割ほど敷いて絵をうっすら透かす
     transparent: Boolean = false,
     onSelect: (Int) -> Unit,
 ) {
-    val container = if (transparent) Color.Transparent else MaterialTheme.colorScheme.background
+    val container = if (transparent) MaterialTheme.colorScheme.background.copy(alpha = HeaderTabScrimAlpha) else MaterialTheme.colorScheme.background
     val tabs: @Composable () -> Unit = {
         titles.forEachIndexed { i, t ->
             Tab(
