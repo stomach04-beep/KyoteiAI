@@ -41,8 +41,8 @@ import com.example.kyoteiai.data.RunLogStore
 import com.example.kyoteiai.data.TimeUtil
 import com.example.kyoteiai.ui.kit.DelayedLoading
 import com.example.kyoteiai.ui.kit.Fmt
-import com.example.kyoteiai.ui.kit.StatusNotice
-import com.example.kyoteiai.ui.kit.HeroStat
+import com.example.kyoteiai.ui.kit.StatusNoticeTrial
+import com.example.kyoteiai.ui.kit.HeroStatTrial
 import com.example.kyoteiai.ui.kit.InfoToggle
 import com.example.kyoteiai.ui.kit.Panel
 import com.example.kyoteiai.ui.kit.PanelShape
@@ -139,7 +139,8 @@ fun TodayScreen(
         //  以前は通信できないとアプリに入っている7月の見本に黙って切り替わり、一覧の上に赤い1文が出るだけで
         //  取り直す手段が無かった（アプリを閉じて開き直すしかなかった）。データのすぐ上に知らせと「再試行」を出す
         notice?.let { n ->
-            StatusNotice(
+            // 2026-11-11 試し版（UiKitTrial.kt：再試行を太字＋枠線に）。承認されたら原本の StatusNotice に戻す
+            StatusNoticeTrial(
                 title = n.title,
                 detail = n.detail,
                 tone = n.tone,
@@ -160,7 +161,8 @@ fun TodayScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            HeroStat(
+            // 2026-11-11 試し版（UiKitTrial.kt：空の「—」を控えめに）。承認されたら原本の HeroStat に戻す
+            HeroStatTrial(
                 label = "本日の狙い目",
                 value = if (isTodayFeed) state.feed?.hotCount?.toString() ?: Fmt.EMPTY else Fmt.EMPTY,
                 unit = if (isTodayFeed) "件" else null,
