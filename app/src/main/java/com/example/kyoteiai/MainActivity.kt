@@ -186,6 +186,10 @@ fun AppRoot(
     var hotOnly by remember { mutableStateOf(false) }
     // レース詳細を開いている場合の対象レース（null=一覧）
     var selectedRace by remember { mutableStateOf<RacePred?>(null) }
+    // 詳細を開いた時点の予想の日付（2026-11-11 コード点検）。取り直し中も一覧を出すようにしたので、
+    //  古い予想の行から開いた後に今日の予想へ替わると、オッズの取得や購入記録が「今日の日付×古い予想のレース」に
+    //  ずれる。開いたときの日付を覚えて詳細に渡す
+    var selectedFeedDate by remember { mutableStateOf<String?>(null) }
     // 通知経由で詳細を開いたときはオッズを自動取得する（一覧タップ時は従来どおり手動）
     var autoFetchOdds by remember { mutableStateOf(false) }
 
@@ -201,6 +205,7 @@ fun AppRoot(
         }
         if (race != null) {
             autoFetchOdds = true
+            selectedFeedDate = feed.date
             selectedRace = race
         }
         onPendingConsumed()  // 見つからなくても消費（古い通知など）
@@ -214,10 +219,12 @@ fun AppRoot(
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             RaceDetailScreen(
                 race = race,
-                feedDate = state.feed?.date,
+                // 開いた時点の日付（無ければ従来どおり今の予想の日付）
+                feedDate = selectedFeedDate ?: state.feed?.date,
                 fetchOnOpen = autoFetchOdds,
                 onBack = {
                     selectedRace = null
+                    selectedFeedDate = null
                     autoFetchOdds = false  // 通知経由フラグは一度使ったら戻す
                 }
             )
@@ -285,7 +292,9 @@ fun AppRoot(
                     hotOnly = hotOnly,
                     onHotOnlyChange = { hotOnly = it },
                     // 一覧タップは従来どおり手動オッズ取得（自動取得は通知経由のみ）
-                    onRaceClick = { autoFetchOdds = false; selectedRace = it }
+                    onRaceClick = { autoFetchOdds = false; selectedFeedDate = state.feed?.date; selectedRace = it },
+                    // 知らせの「再試行」で予想を取り直す（2026-11-11。以前は取り直す手段が無かった）
+                    onRetry = { vm.load() }
                 )
                 PAGE_RESULTS -> ResultScreen(
                     state = resultState,

@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -38,7 +39,9 @@ import com.example.kyoteiai.data.PickLogRepository
 import com.example.kyoteiai.data.RacePred
 import com.example.kyoteiai.data.RunLogStore
 import com.example.kyoteiai.data.TimeUtil
+import com.example.kyoteiai.ui.kit.DelayedLoading
 import com.example.kyoteiai.ui.kit.Fmt
+import com.example.kyoteiai.ui.kit.StatusNotice
 import com.example.kyoteiai.ui.kit.HeroStat
 import com.example.kyoteiai.ui.kit.InfoToggle
 import com.example.kyoteiai.ui.kit.Panel
@@ -66,7 +69,8 @@ fun TodayScreen(
     state: FeedUiState,
     hotOnly: Boolean,
     onHotOnlyChange: (Boolean) -> Unit,
-    onRaceClick: (RacePred) -> Unit
+    onRaceClick: (RacePred) -> Unit,
+    onRetry: () -> Unit = {}
 ) {
     // ── C'成立レースの集合（picks.json から本日分を読む）──────────
     //  EvPickWorkerが締切前オッズでC'条件（EV≥1.2・確率≥0.2）成立を観測すると
@@ -113,11 +117,43 @@ fun TodayScreen(
         }
     }
 
+    // 今日の日付（予想が今日のものかの判定に使う。知らせの判定 feedNotice と同じ値を渡す）。
+    //  状態として持ち、日付が変わったら付け直す（ただの計算だと、開きっぱなしで0時をまたいでも
+    //  描き直されるまで昨日のまま＝昨日の予想の件数が「本日の狙い目」に出続けた・2026-11-11 コード点検）
+    val today by produceState(java.time.LocalDate.now().toString()) {
+        while (true) {
+            val now = java.time.LocalDateTime.now()
+            val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay()
+            kotlinx.coroutines.delay(java.time.Duration.between(now, nextMidnight).toMillis() + 1_000)
+            value = java.time.LocalDate.now().toString()
+        }
+    }
+    // 表示中の予想が今日のものか（違えば主役の件数を出さない）
+    val isTodayFeed = state.feed?.date == today
+    // 上に出す知らせ（取得の失敗・今日の予想が無い。2026-11-11 APP_RULES H1）
+    val notice = feedNotice(state.feed?.date, state.fromRemote, state.loading, today, state.lastAttemptFailed)
+
     Column(modifier = Modifier.fillMaxSize()) {
+
+        // ── 取得の失敗の知らせ（2026-11-11 UiKit 6章 StatusNotice）──────────
+        //  以前は通信できないとアプリに入っている7月の見本に黙って切り替わり、一覧の上に赤い1文が出るだけで
+        //  取り直す手段が無かった（アプリを閉じて開き直すしかなかった）。データのすぐ上に知らせと「再試行」を出す
+        notice?.let { n ->
+            StatusNotice(
+                title = n.title,
+                detail = n.detail,
+                tone = n.tone,
+                actionLabel = n.actionLabel,
+                onAction = if (n.actionLabel != null) onRetry else null,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)
+            )
+        }
 
         // ── 主役：本日の狙い目の件数（2026-10-23 表示の決まり UiKit）──────
         //  以前は先頭に開発者向けの収集集計が1行で出ていた。画面を開いて最初に
         //  知りたいのは「今日の狙い目が何件あるか」なので、それを HeroStat にする
+        //  2026-11-11：今日の予想でないとき（見本・古い予想）は件数を出さない。7月の見本の件数が
+        //  「本日の狙い目」として出ていた
         Panel(
             emphasized = true,
             modifier = Modifier
@@ -126,8 +162,8 @@ fun TodayScreen(
         ) {
             HeroStat(
                 label = "本日の狙い目",
-                value = state.feed?.hotCount?.toString() ?: Fmt.EMPTY,
-                unit = if (state.feed != null) "件" else null,
+                value = if (isTodayFeed) state.feed?.hotCount?.toString() ?: Fmt.EMPTY else Fmt.EMPTY,
+                unit = if (isTodayFeed) "件" else null,
                 sub = "AIが高確信と判断したレース",
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
             )
@@ -170,26 +206,17 @@ fun TodayScreen(
         }
 
         when {
-            // 読み込み中
-            state.loading -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
-            // 取得失敗
+            // 予想がまだ無い：読み込みの印は1秒続いたときだけ、画面に1か所（2026-11-11 APP_RULES H3）。
+            //  取れなかったときは上の知らせが伝えるので、ここには何も出さない
+            //  ※予想があれば取り直し中でも一覧を出したままにする（以前は読み込み中なら一覧ごと回転の印に替えていた）
             state.feed == null -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = state.errorMessage ?: "データがありません",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                DelayedLoading(loading = state.loading) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
                 }
             }
             // 一覧表示
@@ -200,15 +227,7 @@ fun TodayScreen(
                 // 締切判定は時刻しか見ない（日付を見ない）ので見た目では気づけない。
                 // 自動通知側は feed.date != today で弾いているが、手動で開くこの画面だけが
                 // 素通りしていたため、日付が今日でなければ必ず警告を出す。
-                if (state.feed.date != java.time.LocalDate.now().toString()) {
-                    Text(
-                        text = "⚠ 表示中のデータは ${state.feed.date} 付です（最新を取得できていません）。" +
-                            "本日のレースではないため、締切表示も当てになりません。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
-                }
+                // 2026-11-11：その警告は一覧の上の赤い1文から、画面上の知らせ（StatusNotice・再試行つき）へ移した
                 // C'成立があるときだけ凡例を出す（普段は場所を取らない）
                 if (cprimeKeys.isNotEmpty()) {
                     Text(

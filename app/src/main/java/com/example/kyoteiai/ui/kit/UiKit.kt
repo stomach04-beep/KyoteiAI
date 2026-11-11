@@ -6,6 +6,11 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ColumnScope
@@ -77,6 +82,24 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * 表示の決まり（全アプリ共通の UI 部品）— 2026-10-23 導入。原本は _shared\UiKit.kt.template。
@@ -601,6 +624,7 @@ val HeaderBackdropActionsWidth = 56.dp
  *  ・artOffsetY … 絵を上下にずらす量（＋で下、−で上）。絵の主役の位置がアプリごとに違うときの微調整（2026-11-01 追加）
  *  ・artEndPadding … 絵を右端からこの幅だけ手前（左）に寄せる。右上のボタンが多くて主役がかぶるアプリ用（null＝既定）
  *  ・artLift … タブがあるとき絵の下端を上に詰める量（null＝既定 HeaderBackdropTabsLift）。0 にすると絵がタブの下端まで来て大きくなる
+ *  ・artAlpha … 絵全体の濃さ（1＝そのまま、小さいほど透ける）。アプリごとに絵を薄くしたいとき用（2026-11-02 追加）
  * 絵は右に寄せ、文字のある左側と下の境目に向かって背景色へ溶かす（文字が読めるように・境目の線は残る）。
  * 絵は暗い配色向けに描いてあるので、明るい配色のときはそのまま敷かず（明るい地に暗い絵はにじみに見える）、
  * 絵の明るさを濃さに変えて primary 1色で塗った「透かし模様」にする（暗い地は透明・光る線や形だけ残る）。
@@ -613,6 +637,7 @@ fun HeaderBackdrop(
     artOffsetY: Dp = 0.dp,
     artEndPadding: Dp? = null,
     artLift: Dp? = null,
+    artAlpha: Float = 0.85f,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val bg = MaterialTheme.colorScheme.background
@@ -658,7 +683,7 @@ fun HeaderBackdrop(
                         // 縮めた絵は右端の歯車の真後ろに隠れるので、歯車の幅ぶん手前（左）へ寄せる
                         .padding(end = endPad)
                         // 溶かす処理（DstIn）は、絵だけを別の層に描いてから効かせる
-                        .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen, alpha = 0.85f)
+                        .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen, alpha = artAlpha)
                         .drawWithContent {
                             drawContent()
                             // 左3割は消し、右へ向かって濃くする（手前へ寄せたときは右端も短く溶かして切れ目を見せない）
@@ -718,6 +743,8 @@ fun ScreenTabs(
     // true で列の背景を半透明にする（HeaderBackdrop の絵の上に置くとき。2026-11-01 追加）。
     // 全く塗らないとタブの文字の後ろに絵が来て読みにくいので、背景色を7割ほど敷いて絵をうっすら透かす
     transparent: Boolean = false,
+    // タブの列の右端に置くもの（歯車など。2026-11-02 追加）。タブとは別の48dpのボタンで、選択状態には関わらない
+    trailing: (@Composable () -> Unit)? = null,
     onSelect: (Int) -> Unit,
 ) {
     val container = if (transparent) MaterialTheme.colorScheme.background.copy(alpha = HeaderTabScrimAlpha) else MaterialTheme.colorScheme.background
@@ -730,7 +757,25 @@ fun ScreenTabs(
             )
         }
     }
-    if (titles.size <= 5) {
+    if (trailing != null) {
+        // 右端にボタンを置くときは、地の色と境目の線を列全体に引く（TabRow の線だとボタンの手前で切れるため）
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().background(container),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TabRow(
+                    selectedTabIndex = selected,
+                    modifier = Modifier.weight(1f),
+                    containerColor = Color.Transparent,
+                    divider = {},
+                    tabs = tabs,
+                )
+                trailing()
+            }
+            HeaderDivider()
+        }
+    } else if (titles.size <= 5) {
         TabRow(
             selectedTabIndex = selected,
             containerColor = container,
@@ -800,10 +845,17 @@ fun GearButton(onClick: () -> Unit) {
     }
 }
 
+/** 推移の線を描けるだけの点があるか（判定はここ1か所。空きを詰めるかを呼び出し側で決めるときもこれを使う） */
+fun sparkDrawable(values: List<Double>): Boolean = values.count { !it.isNaN() && !it.isInfinite() } >= 2
+
 /**
- * 小さな推移グラフ（48×16dp・線1本・1色）。軸も目盛りも描かない。
- * 線の色は上げ下げで変えない（新しく足した小さなグラフなので1色）。点が2つ未満なら何も描かない。
+ * 小さな推移グラフ（既定 48×16dp・線1本・1色）。軸も目盛りも描かない。
+ * 線の色は上げ下げで変えない（向きは ▲▼ と Sem.sign の色で伝える）。
  *  ・values … 古い順の値
+ *  ・width … Dp.Unspecified を渡すと横いっぱい（2枚並びのカードの下に置くとき用）
+ *  ・fill … 線の下を同じ色の薄い面（16%）で塗る（2026-11-11 追加。色つきのカードの中など、少し大きく見せる所で使う）
+ *  ・keepSpace … 点が2つ未満のとき、同じ大きさの空きを置く（false なら何も置かない＝今までどおり）
+ * 2026-11-11：終点の丸が右端・上下で切れていたので、丸の半径ぶん内側に描くようにした
  */
 @Composable
 fun Sparkline(
@@ -812,26 +864,559 @@ fun Sparkline(
     width: Dp = 48.dp,
     height: Dp = 16.dp,
     color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    fill: Boolean = false,
+    keepSpace: Boolean = false,
 ) {
+    val sized = if (width.isSpecified) modifier.size(width, height) else modifier.fillMaxWidth().height(height)
+    if (!sparkDrawable(values)) {
+        if (keepSpace) Spacer(modifier = sized)
+        return
+    }
     val pts = values.filter { !it.isNaN() && !it.isInfinite() }
-    if (pts.size < 2) return
-    Canvas(modifier = modifier.size(width, height)) {
+    Canvas(modifier = sized) {
         val min = pts.min()
         val max = pts.max()
         val span = (max - min).takeIf { it > 0.0 } ?: 1.0
         val stroke = 1.5.dp.toPx()
-        // 線の太さの半分だけ内側に描いて、上端・下端が切れないようにする
-        val top = stroke / 2
-        val h = size.height - stroke
-        val path = Path()
-        pts.forEachIndexed { i, v ->
-            val x = size.width * i / (pts.size - 1)
-            val y = top + h * (1 - ((v - min) / span)).toFloat()
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        val dot = stroke * 1.2f
+        val top = dot
+        val h = size.height - dot * 2
+        val w = size.width - dot
+        fun px(i: Int) = w * i / (pts.size - 1)
+        fun py(v: Double) = top + h * (1 - ((v - min) / span)).toFloat()
+        val line = Path()
+        pts.forEachIndexed { i, v -> if (i == 0) line.moveTo(px(i), py(v)) else line.lineTo(px(i), py(v)) }
+        if (fill) {
+            // 線の形をなぞって下端で閉じ、同じ色の薄い面で塗る
+            val area = Path().apply {
+                pts.forEachIndexed { i, v -> if (i == 0) moveTo(px(i), py(v)) else lineTo(px(i), py(v)) }
+                lineTo(w, size.height)
+                lineTo(0f, size.height)
+                close()
+            }
+            drawPath(area, color.copy(alpha = color.alpha * 0.16f))
         }
-        drawPath(path, color, style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(line, color, style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
         // 最新の点だけ小さな丸で示す
-        val lastY = top + h * (1 - ((pts.last() - min) / span)).toFloat()
-        drawCircle(color, radius = stroke * 1.2f, center = Offset(size.width, lastY))
+        drawCircle(color, radius = dot, center = Offset(w, py(pts.last())))
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 5. 要注意の物だけ目立たせる部品（2026-11-11・APP_RULES.md G）
+//    内訳の帯／色を敷いたカード／その上の札／並べ方の骨組み（大きいカード・色つきの行・まとめた面）
+//    手本は MacroAlert v2.20 の ui/HomeIndicatorList.kt。並べ方は実機で3回直して決めた形なので、
+//    アプリ側で組み直さず下の入れ物（ToneCardWide・ToneCardHalf・ToneRow・CalmGroup）に中身を差し込む
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 色を敷いたカードの地の濃さ（暗い表示／明るい表示）。変えるときはこの2つだけ直して配り直す。
+ * 2026-11-11 計算（ミッドナイトの面 #121A2B・白の上、WCAG のコントラスト比）：
+ *  ・暗い 0.24 だと注意（黄）のカードの上で ＋の赤 3.9・補足の文字 3.9 と 4.5 に届かなかった
+ *  ・暗い 0.16 なら 赤 4.9〜5.4／青 5.5〜6.1／警戒の橙 5.9〜6.5／補足 4.8〜5.3
+ *  ・明るい 0.14 は 赤・青・橙 5.1〜5.3／補足 4.9〜5.1
+ * 札 ToneChip の地（Sem.bg＝暗い 0.20・明るい 0.10）とは役割が別（札は中に文字1つ、カードは小さい色文字が載る）
+ */
+const val TONE_CARD_ALPHA_DARK = 0.16f
+const val TONE_CARD_ALPHA_LIGHT = 0.14f
+
+/** 色を敷いたカードの角丸（ふつうの面 PanelShape の 12dp より大きくして、別格の面だと分かるようにする） */
+val ToneCardShape = RoundedCornerShape(16.dp)
+
+/** 色を敷いたカードの地の色（濃さは上の定数2つだけで決める） */
+@Composable
+fun toneCardColor(tone: Tone): Color =
+    Sem.fg(tone)
+        .copy(alpha = if (Sem.isDark()) TONE_CARD_ALPHA_DARK else TONE_CARD_ALPHA_LIGHT)
+        .compositeOver(MaterialTheme.colorScheme.surface)
+
+/**
+ * 内訳を横1本の帯で見せる（高さ8dp・角丸4dp・区切り3dp）。主役の数字の下に置き、札の文字を読む前に割合が分かるようにする。
+ *  ・parts … 並べる順の（色の役割, 件数）。0件の区画は描かない
+ *  ・幅は件数に比例。ただし1件でも見えるよう、どの区画も6dpより細くしない
+ *  ・目立たせない区画（正常など）は呼び出し側が Tone.NORMAL を渡す（その区画だけ薄く描く）
+ */
+@Composable
+fun ToneDistBar(parts: List<Pair<Tone, Int>>, modifier: Modifier = Modifier) {
+    val shown = parts.filter { it.second > 0 }
+    if (shown.isEmpty()) return
+    // 色は描画の外で取っておく（Canvas の中では Sem.fg を呼べない）
+    val colors = shown.map { (tone, _) ->
+        if (tone == Tone.NORMAL) Sem.fg(tone).copy(alpha = 0.35f) else Sem.fg(tone)
+    }
+    val counts = shown.map { it.second }
+    Canvas(modifier = modifier.fillMaxWidth().height(8.dp)) {
+        val gap = 3.dp.toPx()
+        val minW = 6.dp.toPx()
+        val radius = CornerRadius(4.dp.toPx())
+        val usable = size.width - gap * (counts.size - 1)
+        if (usable <= 0f) return@Canvas
+        // まず件数に比例で割り、細すぎる区画を最小幅に引き上げ、残りの幅をほかの区画で比例に分け直す
+        val total = counts.sum().toFloat()
+        val raw = counts.map { usable * it / total }
+        val small = raw.map { it < minW }
+        val restWidth = usable - minW * small.count { it }
+        val restTotal = counts.filterIndexed { i, _ -> !small[i] }.sum().toFloat()
+        val widths = counts.mapIndexed { i, n ->
+            when {
+                small[i] -> minW
+                restTotal > 0f && restWidth > 0f -> restWidth * n / restTotal
+                else -> raw[i]
+            }
+        }
+        var x = 0f
+        widths.forEachIndexed { i, w ->
+            drawRoundRect(color = colors[i], topLeft = Offset(x, 0f), size = Size(w, size.height), cornerRadius = radius)
+            x += w + gap
+        }
+    }
+}
+
+/**
+ * 色を敷いたカード（要注意の物など、目を向けてほしい物だけに使う。1画面の大半をこれにしない）。
+ * 地は tone の色を薄く敷いた面、枠は同じ色の細い線。押せるときは onClick を渡す
+ */
+@Composable
+fun ToneCard(
+    tone: Tone,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    val color = toneCardColor(tone)
+    val border = BorderStroke(1.dp, Sem.fg(tone).copy(alpha = 0.55f))
+    if (onClick != null) {
+        Surface(onClick = onClick, modifier = modifier, shape = ToneCardShape, color = color, border = border, content = content)
+    } else {
+        Surface(modifier = modifier, shape = ToneCardShape, color = color, border = border, content = content)
+    }
+}
+
+/**
+ * 色を敷いたカードの上に置く札。ToneChip は地がカードと同じ色で溶けてしまうので、
+ * 地をふつうの面の色（surface）にして、文字だけ tone の色にする。危険の札は文字に ⚠ を付ける（APP_RULES.md B4）
+ */
+@Composable
+fun ToneLabel(text: String, tone: Tone, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Bold,
+        color = Sem.fg(tone),
+        maxLines = 1,
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 10.dp, vertical = 3.dp),
+    )
+}
+
+/** 組の小見出し（「要注意」「正常」など。12sp・太字・補足色） */
+@Composable
+fun GroupLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier.padding(start = 4.dp, top = 14.dp, bottom = 6.dp),
+    )
+}
+
+/** 「押すと開く」の印（行にもカードにも同じ物を使う） */
+@Composable
+fun Chevron(modifier: Modifier = Modifier) {
+    Text(text = "›", fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier)
+}
+
+/** 色つきのカードの頭（札と「›」の段 → 名前。名前は2行まで）。ToneCardWide・ToneCardHalf の中で使う */
+@Composable
+private fun ToneCardHead(label: String, name: String, tone: Tone, clickable: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        ToneLabel(text = label, tone = tone)
+        Spacer(modifier = Modifier.weight(1f))
+        if (clickable) Chevron()
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        text = name,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/**
+ * 横いっぱいの大きいカード。上の段＝札＋名前（幅いっぱい）、下の段＝左に texts（値・増減・時刻）・右に trailing（推移の線など）。
+ * 名前の横に線を置くと長い名前が数文字だけ2行目に落ちたので、この形に固定した（2026-11-11 実機）
+ */
+@Composable
+fun ToneCardWide(
+    tone: Tone,
+    label: String,
+    name: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    trailing: @Composable () -> Unit = {},
+    texts: @Composable ColumnScope.() -> Unit,
+) {
+    ToneCard(tone = tone, modifier = modifier.fillMaxWidth(), onClick = onClick) {
+        Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+            ToneCardHead(label = label, name = name, tone = tone, clickable = onClick != null)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f), content = texts)
+                Spacer(modifier = Modifier.width(10.dp))
+                trailing()
+            }
+        }
+    }
+}
+
+/**
+ * 2枚並びの大きいカードの1枚。札＋名前 → texts → bottom（推移の線など。下端に寄せるので左右のカードでそろう）。
+ * ToneCardGrid の half の中で、渡された modifier を付けて使う。長い値は texts の側で2行まで折り返す
+ */
+@Composable
+fun ToneCardHalf(
+    tone: Tone,
+    label: String,
+    name: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    bottom: @Composable () -> Unit = {},
+    texts: @Composable ColumnScope.() -> Unit,
+) {
+    ToneCard(tone = tone, modifier = modifier, onClick = onClick) {
+        Column(modifier = Modifier.fillMaxWidth().fillMaxHeight().padding(14.dp)) {
+            ToneCardHead(label = label, name = name, tone = tone, clickable = onClick != null)
+            texts()
+            // 値が折り返した側だけ下の物の位置が下がるので、下端に寄せて左右でそろえる
+            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(8.dp))
+            bottom()
+        }
+    }
+}
+
+/**
+ * 大きいカードの並べ方。1枚→横いっぱい／2枚→横に2枚／3枚以上→奇数なら先頭1枚を横いっぱい、残りを2枚ずつ。
+ *  ・wide(i) … i 番目を横いっぱいで描く（ToneCardWide）
+ *  ・half(i, modifier) … i 番目を2枚並びで描く（ToneCardHalf に modifier を渡す。高さがそろう）
+ * 大きいカードにするのは重い段階だけ（APP_RULES.md G2）。中で BoxWithConstraints を使うと高さの計算で落ちる
+ */
+@Composable
+fun ToneCardGrid(
+    count: Int,
+    modifier: Modifier = Modifier,
+    wide: @Composable (Int) -> Unit,
+    half: @Composable (Int, Modifier) -> Unit,
+) {
+    if (count <= 0) return
+    val wideFirst = count % 2 == 1
+    val rest = (if (wideFirst) 1 else 0) until count
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (wideFirst) wide(0)
+        rest.chunked(2).forEach { pair ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+            ) {
+                pair.forEach { i -> half(i, Modifier.weight(1f).fillMaxHeight()) }
+            }
+        }
+    }
+}
+
+/**
+ * 色を敷いた通常の高さの行（軽い段階＝「注意」など、件数が多くなりうる物）。
+ * 上の段＝札＋名前（行の幅いっぱい）、下の段＝左に sub（時刻など。長いときに縮むのはここ）・右に trailing（線・値・「›」）。
+ * 札を時刻と同じ段に置くと時刻が切れ、名前の右に置くと名前が2文字まで削られたので、この形に固定した（2026-11-11 実機）
+ */
+@Composable
+fun ToneRow(
+    tone: Tone,
+    label: String,
+    name: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    sub: @Composable () -> Unit = {},
+    trailing: @Composable RowScope.() -> Unit = {},
+) {
+    ToneCard(tone = tone, modifier = modifier.fillMaxWidth(), onClick = onClick) {
+        Column(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(end = 12.dp),
+            ) {
+                ToneLabel(text = label, tone = tone)
+                Text(
+                    text = name,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Box(modifier = Modifier.weight(1f)) { sub() }
+                trailing()
+            }
+        }
+    }
+}
+
+/**
+ * 目立たせない物（正常など）を1つの面にまとめる。行の間は細い線（面をやめた代わりの境目。APP_RULES.md C4 の例外）。
+ *  ・row(i) … i 番目の行を描く（行全体を押せるようにするのは呼び出し側。高さ56dp以上）
+ */
+@Composable
+fun CalmGroup(count: Int, modifier: Modifier = Modifier, row: @Composable (Int) -> Unit) {
+    if (count <= 0) return
+    Panel(modifier = modifier.fillMaxWidth()) {
+        Column {
+            for (i in 0 until count) {
+                if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                row(i)
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 6. 状態の出し方（失敗の知らせ・読み込みの印・数字の動き・読み上げ説明・画面下の知らせ）
+//    2026-11-11 RainAlert v1.20 で試作し、利用者が承認して原本へ移した（APP_RULES.md 3-c）。
+//    出典は UI_REFERENCE.md の 5・11章（動き）、30・34章（グラフ・読み込み・スナックバー）、31章（失敗の出し方）。
+//    手本は RainAlert の HomeScreen（取得の状態の判定 forecastFetchStatus と知らせの文 forecastNotice）
+// ═══════════════════════════════════════════════════════════════
+
+// ────────────────────────────────────────────────────────────────────
+// 1) 短い読み込みでは印を出さない（34章：M3 は 200ms 未満は出さない／31章：NN/g は1秒未満は出さない）
+//    どちらにするかは利用者の判断待ち（検討書 7章の2）。値はこの定数1か所だけで決める
+// ────────────────────────────────────────────────────────────────────
+// 2026-11-11 利用者決定：1秒（APP_RULES H3）
+const val LOADING_SHOW_DELAY_MS = 1000L
+
+/**
+ * [loading] が [delayMs] 以上続いたときだけ [content]（読み込みの印）を出す。
+ * すぐ終わる取得で印がちらっと出て消える「ちらつき」をなくす。印は画面に1か所だけ置く（34章）
+ */
+@Composable
+fun DelayedLoading(
+    loading: Boolean,
+    delayMs: Long = LOADING_SHOW_DELAY_MS,
+    content: @Composable () -> Unit,
+) {
+    var show by remember { mutableStateOf(false) }
+    LaunchedEffect(loading) {
+        if (loading) {
+            delay(delayMs)
+            show = true
+        } else {
+            show = false
+        }
+    }
+    // 出るとき・消えるときは透明度だけを変える（色・透明度の動きははね返らせない＝5章）
+    AnimatedVisibility(visible = show && loading, enter = fadeIn(), exit = fadeOut()) {
+        content()
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 2) 失敗の知らせ（31章：何が起きたかを平易に＋次の一手。前回の値は消さずに知らせる）
+//    例外の文（e.message）・エラー番号は画面に出さない。記録（更新履歴）にだけ残す
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * 取得に失敗したことを、データのそばに1枚で知らせる。
+ * @param title 何が起きたか（例：「予報を取得できませんでした」）。危険の段階なら ⚠ を先頭に付ける（APP_RULES B4）
+ * @param detail 今どうなっているか＋原因の手がかり（例：「12:41 の予報を表示中。電波の届く所で再試行してください。」。2行に収まる長さにする）
+ * @param actionLabel 次の一手のボタンの文字（null ならボタンなし）
+ */
+@Composable
+fun StatusNotice(
+    title: String,
+    detail: String,
+    tone: Tone = Tone.CAUTION,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    val fg = Sem.fg(tone)
+    androidx.compose.material3.Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = PanelShape,
+        // 地の濃さは5章の toneCardColor だけで決める。アプリごとに濃さを書かない（APP_RULES G4）
+        color = toneCardColor(tone),
+        // 段階の色で細い枠を引く（2026-11-11 見た目の点検：明るい表示では薄い地が背景に溶けて境目が見えなかった。
+        // 太さと濃さは Panel の枠と同じ1dp・45%）
+        border = androidx.compose.foundation.BorderStroke(PanelBorderWidth, fg.copy(alpha = 0.45f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    // 失敗・停止の知らせは段階によらず ⚠ を付ける（APP_RULES B4：危険は印＋文字。＋の赤や雨の青と見分けるため）
+                    text = if (tone == Tone.INFO || tone == Tone.OK || tone == Tone.NORMAL) title else "⚠ $title",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = fg,
+                )
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            if (actionLabel != null && onAction != null) {
+                // 押す所は48dp以上（TextButton の既定の高さで満たす・APP_RULES C5）
+                TextButton(onClick = onAction) {
+                    Text(actionLabel, fontWeight = FontWeight.Bold, color = fg)
+                }
+            }
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 3) 数字の切り替わり（5・11章：増えたら下から上へ、減ったら上から下へ短く動かす。
+//    全部の数字に掛けず「変わったことを伝えたい主役の数字」だけに使う）
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * 整数の値が変わったときだけ、上下に短くすべらせて切り替える。
+ * 初めて描くときは動かさない（AnimatedContent は最初の表示を動かさない）。
+ * @param format 値を文字にする関数（例：{ "$it%" }）。整形は呼び出し側の1か所で決める
+ */
+@Composable
+fun AnimatedNumber(
+    value: Int,
+    format: (Int) -> String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+    fontWeight: FontWeight? = null,
+) {
+    AnimatedContent(
+        targetState = value,
+        modifier = modifier,
+        // 数字は右寄せ（APP_RULES C3）。桁数が変わる切り替え（70%→100%）の間も右端をそろえ、
+        // 古い数字が横へずれて見えないようにする（2026-11-11 実機の録画で確認）
+        contentAlignment = Alignment.CenterEnd,
+        transitionSpec = {
+            // 増えた → 新しい数字が下から上がってくる／減った → 上から下りてくる
+            val up = targetState > initialState
+            // 桁数が増える切り替えの間、入れ物が古い幅のまま新しい数字の左端（100% の「1」）を切っていたので、
+            // 大きさの変化では切り取らない（SizeTransform(clip = false)）
+            // 古い数字を先に短く消し、少し遅れて新しい数字を出す（同時だと半分ずつ透けて重なり、にじんで見えた）
+            ((slideInVertically { h -> if (up) h / 2 else -h / 2 } + fadeIn(tween(durationMillis = 220, delayMillis = 90))) togetherWith
+                (slideOutVertically { h -> if (up) -h / 2 else h / 2 } + fadeOut(tween(durationMillis = 90))))
+                .using(SizeTransform(clip = false))
+        },
+        label = "AnimatedNumber",
+    ) { v ->
+        Text(
+            text = format(v),
+            style = style,
+            color = color,
+            fontWeight = fontWeight,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 4) グラフ・図の読み上げ説明（30・34章：要点＋見せる理由を一文で。数値を全部は並べない）
+//    見た目は変わらない。中の部品を1つの説明にまとめて読ませる
+// ────────────────────────────────────────────────────────────────────
+
+/** グラフや時間ごとの並びに、読み上げ用の一文を付ける */
+fun Modifier.chartSummary(summary: String): Modifier =
+    // 子（時刻・%・気温・絵）の読み上げを消して、この一文だけを読ませる（mergeDescendants だと子が後ろに続いて読まれた・2026-11-11 コード点検）
+    clearAndSetSemantics { contentDescription = summary }
+
+// ────────────────────────────────────────────────────────────────────
+// 5) 画面の操作の結果は画面下の知らせ（スナックバー）で出す（34章）
+//    文は1行（入りきらない分は…）・ボタンは1つまで・ボタンなしは自動で消える。同時に1つだけ。
+//    裏の処理（サービス・タイル）から出す Toast や、別の画面（端末の設定）へ移る直前の案内の Toast は残す
+// ────────────────────────────────────────────────────────────────────
+
+/** 画面のどこからでも知らせを出すための入口。AppRoot の Scaffold で1つだけ用意する */
+class UiMessages(private val host: SnackbarHostState, private val scope: CoroutineScope) {
+    /**
+     * 知らせを出す。前の知らせが出ていれば先に閉じる（同時に1つだけ）
+     * @param actionLabel ボタンの文字（null ならボタンなし＝自動で消える）
+     */
+    fun show(text: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
+        scope.launch {
+            host.currentSnackbarData?.dismiss()
+            val result = host.showSnackbar(
+                message = text,
+                actionLabel = actionLabel,
+                // ボタンなしは短く（約4秒）で自動で消す（34章：4〜10秒）。
+                // ボタンありも約10秒で自動で消す。※34章の M3 は「ボタン付きは押されるか閉じられるまで残す」で、ここは逆。
+                //   ✕を外したため、残す作りだと通信が戻った後も・画面を移った後も消えなくなる（2026-11-11 コード点検）。
+                //   2026-11-11 利用者決定「約10秒で消す」（APP_RULES H6）
+                // 閉じる✕は付けない（操作は1つだけ＝34章。✕があると文が語の途中で2行に折れた・2026-11-11 実機）
+                duration = if (actionLabel == null) SnackbarDuration.Short else SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed) onAction?.invoke()
+        }
+    }
+}
+
+/** 下の層の画面から UiMessages を取り出す（用意されていなければ null＝何もしない） */
+val LocalUiMessages = staticCompositionLocalOf<UiMessages?> { null }
+
+/**
+ * 画面下の知らせの置き場。色はアプリの配色から決める（2026-11-11 実機で確認）。
+ * 既定の SnackbarHost のままだと、配色に inverse 系の色が無いため Material3 の既定の薄紫になり、
+ * 紙の帳簿・ミッドナイトのどちらの配色からも浮いて見えた。
+ * 地＝文字の色（onSurface）・文字とボタン＝面の色（surface）で、面の色を反転させた形にする。
+ *
+ * ボタン（「再試行」など）は太字＋細い枠線・両端の丸い形（2026-11-11 RainAlert v1.23 で3案を試し利用者が決定）。
+ * 文と同じ色・同じ太さだとボタンに見えなかった。色は足さない（配色が多く、primary 系は地の上で沈む配色が出る）。
+ * M3 の「文字だけのボタン」からは外れる（APP_RULES H6）
+ */
+@Composable
+fun AppSnackbarHost(host: SnackbarHostState) {
+    androidx.compose.material3.SnackbarHost(host) { data ->
+        val cs = MaterialTheme.colorScheme
+        val label = data.visuals.actionLabel
+        androidx.compose.material3.Snackbar(
+            // 外側の12dpは自分で足す。中身を渡すだけの形（snackbarData を渡す）は部品の中で足すが、
+            // ボタンと文を自分で描くこの形は足さないので、書かないと角丸のまま画面の端に付く（2026-11-11 コード点検）
+            modifier = Modifier.padding(12.dp),
+            shape = PanelShape,
+            containerColor = cs.onSurface,
+            contentColor = cs.surface,
+            action = if (label == null) null else {
+                {
+                    // 押したら必ず performAction（呼ばないと UiMessages.show に結果が返らず、ボタンが黙って効かない）。
+                    // 見た目の高さは32dp（上下と右のすき間をそろえる）。押せる範囲は Material3 が48dpに広げる（APP_RULES C5・実機の座標で確認）
+                    TextButton(
+                        onClick = { data.performAction() },
+                        modifier = Modifier.height(32.dp),
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        border = BorderStroke(PanelBorderWidth, cs.surface.copy(alpha = 0.60f)),
+                        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = cs.surface),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp),
+                    ) {
+                        Text(label, fontWeight = FontWeight.Bold, maxLines = 1)
+                    }
+                }
+            },
+        ) {
+            // 文は1行（APP_RULES H6）。入りきらない分は…で切る（ボタンは右に残る）
+            Text(data.visuals.message, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
