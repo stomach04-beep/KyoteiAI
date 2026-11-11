@@ -5,5 +5,9 @@
         <activity
             android:name=".debug.DesignPreviewActivity"
             android:exported="true" />
+        <!-- 2026-11-12 snackbar before/after preview on race detail (debug only) -->
+        <activity
+            android:name=".debug.SnackPreviewActivity"
+            android:exported="true" />
     </application>
 </manifest>

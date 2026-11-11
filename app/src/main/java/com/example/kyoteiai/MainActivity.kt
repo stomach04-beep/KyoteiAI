@@ -8,17 +8,23 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -42,7 +48,10 @@ import com.example.kyoteiai.ui.ResultScreen
 import com.example.kyoteiai.ui.ResultViewModel
 import com.example.kyoteiai.ui.SettingsScreen
 import com.example.kyoteiai.ui.TodayScreen
+import com.example.kyoteiai.ui.kit.AppSnackbarHost
 import com.example.kyoteiai.ui.kit.GearButton
+import com.example.kyoteiai.ui.kit.LocalUiMessages
+import com.example.kyoteiai.ui.kit.UiMessages
 import com.example.kyoteiai.ui.kit.HeaderAppIcon
 import com.example.kyoteiai.ui.kit.HeaderBackdrop
 import androidx.compose.ui.res.painterResource
@@ -141,10 +150,26 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppRoot(
-                        pendingRaceKey = pendingRaceKey.value,
-                        onPendingConsumed = { pendingRaceKey.value = null }
-                    )
+                    // 画面下の知らせ（スナックバー）の置き場はアプリ全体で1つだけ（同時に1つ・UiKit の UiMessages）。2026-11-12 v2.13
+                    val snackbarHost = remember { SnackbarHostState() }
+                    val uiScope = rememberCoroutineScope()
+                    val uiMessages = remember(snackbarHost, uiScope) { UiMessages(snackbarHost, uiScope) }
+                    // AppRoot の中の各画面は自分で上下のバーの余白を取っているので、Scaffold は余白を足さない（WindowInsets(0)）。
+                    // そのままだと帯がナビゲーションバーの裏に潜るので、帯の外側にだけナビゲーションバー分の余白を付ける
+                    Scaffold(
+                        contentWindowInsets = WindowInsets(0),
+                        snackbarHost = {
+                            Box(modifier = Modifier.navigationBarsPadding()) { AppSnackbarHost(snackbarHost) }
+                        },
+                        containerColor = MaterialTheme.colorScheme.background
+                    ) { _ ->
+                        CompositionLocalProvider(LocalUiMessages provides uiMessages) {
+                            AppRoot(
+                                pendingRaceKey = pendingRaceKey.value,
+                                onPendingConsumed = { pendingRaceKey.value = null }
+                            )
+                        }
+                    }
                 }
             }
         }
