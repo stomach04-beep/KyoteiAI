@@ -26,7 +26,7 @@ import java.time.LocalDate
  * 予想の取得（FeedRepository.load）は呼ばない。呼ぶと本物の締切アラームを登録してしまうため。
  * 知らせの文は本物と同じ判定（feedNotice）が作る。
  *
- * 開き方（mode = light / dark、case = ok / sample / stale / none / loading / retry）:
+ * 開き方（mode = light / dark、case = ok / sample / stale / failed / next / none / loading / retry）:
  *   adb shell am start --activity-clear-task -n com.example.kyoteiai/.debug.DesignPreviewActivity --es mode light --es case sample
  * 注意：撮影を am start -S や am force-stop で終えない（停止状態になり予約が消える）。終わったら本物の画面を1回開く
  */
@@ -42,6 +42,10 @@ class DesignPreviewActivity : ComponentActivity() {
         val initial = when (case) {
             "ok" -> FeedUiState(loading = false, feed = sample?.copy(date = today), fromRemote = true)
             "stale" -> FeedUiState(loading = false, feed = sample?.copy(date = yesterday), fromRemote = true)
+            // 昨日の予想を表示中に取り直しが通信の失敗で終わった
+            "failed" -> FeedUiState(loading = false, feed = sample?.copy(date = yesterday), fromRemote = true, lastAttemptFailed = true)
+            // 明日の予想を受け取った（feed_today の取得だけが失敗）
+            "next" -> FeedUiState(loading = false, feed = sample?.copy(date = LocalDate.now().plusDays(1).toString()), fromRemote = true)
             "none" -> FeedUiState(loading = false, feed = null, fromRemote = false)
             "loading" -> FeedUiState(loading = true, feed = null, fromRemote = false)
             "retry" -> FeedUiState(loading = true, feed = sample, fromRemote = false)

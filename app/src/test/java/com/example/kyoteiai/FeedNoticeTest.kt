@@ -100,6 +100,31 @@ class FeedNoticeTest {
         assertEquals(false, r.loading)
     }
 
+    @Test fun ネットの古い予想を表示中に取り直しが失敗したら文を分ける() {
+        val prev = FeedUiState(loading = true, feed = feed("2026-11-10"), fromRemote = true)
+        val r = mergeFeedResult(prev, feed("2026-07-08"), fromRemote = false)
+        assertTrue(r.lastAttemptFailed)
+        val n = feedNotice(r.feed!!.date, r.fromRemote, r.loading, today, r.lastAttemptFailed)!!
+        assertEquals("予想を取り直せませんでした", n.title)
+        assertTrue(n.detail.contains("11/10 の予想を表示中"))
+        assertTrue(n.detail.lines().size <= 2)
+    }
+
+    @Test fun 明日の予想は今日の予想が無いのと分ける() {
+        val n = feedNotice("2026-11-12", fromRemote = true, loading = false, today = today)!!
+        assertEquals("今日の予想を取れません", n.title)
+        assertTrue(n.detail.startsWith("11/12 の予想を表示中"))
+        assertTrue(n.detail.contains("明日以降"))
+        assertTrue(n.detail.lines().size <= 2)
+    }
+
+    @Test fun ネットの古い予想どうしは新しい方を残す() {
+        val prev = FeedUiState(loading = true, feed = feed("2026-11-10"), fromRemote = true)
+        val r = mergeFeedResult(prev, feed("2026-11-09"), fromRemote = true)
+        assertEquals("2026-11-10", r.feed!!.date)
+        assertEquals(false, r.loading)
+    }
+
     @Test fun 取り直しで今日の予想が取れたら置き換える() {
         val prev = FeedUiState(loading = true, feed = feed("2026-07-08"), fromRemote = false)
         val r = mergeFeedResult(prev, feed(today), fromRemote = true)

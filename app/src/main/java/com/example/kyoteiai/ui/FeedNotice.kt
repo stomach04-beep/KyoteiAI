@@ -32,11 +32,18 @@ internal data class FeedNotice(
  * @param loading 取得中か
  * @param today 今日の日付（"2026-11-11"）
  */
-internal fun feedNotice(feedDate: String?, fromRemote: Boolean, loading: Boolean, today: String): FeedNotice? {
+internal fun feedNotice(
+    feedDate: String?,
+    fromRemote: Boolean,
+    loading: Boolean,
+    today: String,
+    lastAttemptFailed: Boolean = false,
+): FeedNotice? {
     // 今日の予想があれば何も出さない
     if (feedDate != null && feedDate == today) return null
     // 初めての読み込み中（まだ何も無い）は印だけ
     if (feedDate == null && loading) return null
+    // 何も無いのに取り直し中、は上で返している。ここから下は feedDate が null なら取り直し中ではない
 
     // 説明は2行まで（APP_RULES H1）。日本語はどの文字の間でも折れて「入ってい／る」のように語が割れたので
     // （2026-11-11 見た目の点検）、1行を短くして区切りの所で改行を入れる
@@ -47,7 +54,22 @@ internal fun feedNotice(feedDate: String?, fromRemote: Boolean, loading: Boolean
         feedDate == null -> {
             title = "予想を取得できませんでした"
             detail = "通信の状態を確かめて、\nもう一度お試しください。"
-            showing = "しばらくお待ちください。"
+            showing = ""
+        }
+        // ネットから取れた古い予想を表示中に、取り直しが通信の失敗で終わった（2026-11-11 コード点検）。
+        //  そのままだと「今日の予想がまだありません」に戻り、圏外なのに予想を作る PC 側が止まっているように読めた
+        fromRemote && lastAttemptFailed -> {
+            title = "予想を取り直せませんでした"
+            showing = "${shortDate(feedDate)} の予想を表示中です。"
+            detail = "通信できないため、\n$showing"
+        }
+        // 明日以降の予想（feed_today の取得だけが失敗して翌日分を受け取った）。PC が止まっているのとは違う
+        fromRemote && feedDate > today -> {
+            // 題名は1行（H1）。「今日の予想を取得できませんでした」「今日の予想を取れませんでした」は
+            //  再試行のボタンと並ぶと実機で2行に折れた（⚠を含め13字まで）
+            title = "今日の予想を取れません"
+            showing = "${shortDate(feedDate)} の予想を表示中です。"
+            detail = "$showing\n明日以降のレースです。"
         }
         !fromRemote -> {
             title = "予想を取得できませんでした"
@@ -85,7 +107,12 @@ internal fun shortDate(date: String): String {
  */
 internal fun mergeFeedResult(prev: FeedUiState, feed: Feed?, fromRemote: Boolean): FeedUiState {
     val hadRemote = prev.feed != null && prev.fromRemote
-    if (hadRemote && (feed == null || !fromRemote)) return prev.copy(loading = false)
-    if (feed == null && prev.feed != null) return prev.copy(loading = false)
-    return FeedUiState(loading = false, feed = feed, fromRemote = fromRemote)
+    // 前の予想を残すときは「直前の取り直しは失敗した」印を立てる（知らせの文を「取り直せませんでした」にするため）
+    if (hadRemote && (feed == null || !fromRemote)) return prev.copy(loading = false, lastAttemptFailed = true)
+    if (feed == null && prev.feed != null) return prev.copy(loading = false, lastAttemptFailed = true)
+    // ネットから取れた古い予想どうしで、新しく取れた方がより古いなら、前の新しい方を残す（今日の予想ではないとき）
+    if (hadRemote && feed != null && fromRemote && feed.date < prev.feed!!.date) {
+        return prev.copy(loading = false, lastAttemptFailed = false)
+    }
+    return FeedUiState(loading = false, feed = feed, fromRemote = fromRemote, lastAttemptFailed = false)
 }

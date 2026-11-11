@@ -55,4 +55,6 @@ data class FeedUiState(
     val loading: Boolean = true,
     val feed: Feed? = null,
     val fromRemote: Boolean = false,
+    // 直前の取り直しが失敗して、前の予想を残したか（知らせの文を分けるため・2026-11-11）
+    val lastAttemptFailed: Boolean = false,
 )

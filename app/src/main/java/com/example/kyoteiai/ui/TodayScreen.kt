@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -116,12 +117,21 @@ fun TodayScreen(
         }
     }
 
-    // 今日の日付（予想が今日のものかの判定に使う。知らせの判定 feedNotice と同じ値を渡す）
-    val today = java.time.LocalDate.now().toString()
+    // 今日の日付（予想が今日のものかの判定に使う。知らせの判定 feedNotice と同じ値を渡す）。
+    //  状態として持ち、日付が変わったら付け直す（ただの計算だと、開きっぱなしで0時をまたいでも
+    //  描き直されるまで昨日のまま＝昨日の予想の件数が「本日の狙い目」に出続けた・2026-11-11 コード点検）
+    val today by produceState(java.time.LocalDate.now().toString()) {
+        while (true) {
+            val now = java.time.LocalDateTime.now()
+            val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay()
+            kotlinx.coroutines.delay(java.time.Duration.between(now, nextMidnight).toMillis() + 1_000)
+            value = java.time.LocalDate.now().toString()
+        }
+    }
     // 表示中の予想が今日のものか（違えば主役の件数を出さない）
     val isTodayFeed = state.feed?.date == today
     // 上に出す知らせ（取得の失敗・今日の予想が無い。2026-11-11 APP_RULES H1）
-    val notice = feedNotice(state.feed?.date, state.fromRemote, state.loading, today)
+    val notice = feedNotice(state.feed?.date, state.fromRemote, state.loading, today, state.lastAttemptFailed)
 
     Column(modifier = Modifier.fillMaxSize()) {
 
