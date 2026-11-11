@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 2026-11-11 status display preview: debug builds only (not included in release) -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".debug.DesignPreviewActivity"
+            android:exported="true" />
+    </application>
+</manifest>

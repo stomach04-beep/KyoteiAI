@@ -110,12 +110,15 @@ fun ResultScreen(
                     CenterHint("予想データがありません。先に「今日」タブを開いてください")
                 }
                 // 取得中（かつ表示できる行がまだ無い）
+                //  2026-11-11：印は1秒続いたときだけ出す（APP_RULES H3。短い取得でちらっと出て消えるのをなくす）
                 state.loading && state.rows.isEmpty() -> item {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator()
+                    com.example.kyoteiai.ui.kit.DelayedLoading(loading = true) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
                     }
                 }
                 // 締切超過レースがまだ無い（本日これから）
@@ -628,13 +631,10 @@ private fun SummaryHeader(
                 modifier = Modifier.weight(1f)
             )
             Spacer(modifier = Modifier.width(8.dp))
-            // 取得中はスピナー、そうでなければ更新ボタン
-            if (loading) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
-            } else {
-                Button(onClick = onRefresh) {
-                    Text("更新")
-                }
+            // 更新ボタン。取得中は押せない形にするだけで、回転の印には替えない（2026-11-11 APP_RULES H3：印は画面に1か所）。
+            //  取得中であることは左の「取得中 m件中n件完了」が伝える。以前は押した瞬間にボタンが回転の印に替わっていた
+            Button(onClick = onRefresh, enabled = !loading) {
+                Text("更新")
             }
         }
     }

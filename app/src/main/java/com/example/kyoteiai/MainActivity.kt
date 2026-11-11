@@ -285,7 +285,9 @@ fun AppRoot(
                     hotOnly = hotOnly,
                     onHotOnlyChange = { hotOnly = it },
                     // 一覧タップは従来どおり手動オッズ取得（自動取得は通知経由のみ）
-                    onRaceClick = { autoFetchOdds = false; selectedRace = it }
+                    onRaceClick = { autoFetchOdds = false; selectedRace = it },
+                    // 知らせの「再試行」で予想を取り直す（2026-11-11。以前は取り直す手段が無かった）
+                    onRetry = { vm.load() }
                 )
                 PAGE_RESULTS -> ResultScreen(
                     state = resultState,

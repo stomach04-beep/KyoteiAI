@@ -42,9 +42,13 @@ fun CalendarScreen(state: FeedUiState) {
         )
 
         when {
-            state.loading -> {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+            // 予想がまだ無く読み込み中のときだけ、1秒続いたら印を出す（2026-11-11 APP_RULES H3）。
+            //  以前は読み込み中なら開催情報があっても画面全体を回転の印に替えていた
+            state.feed == null && state.loading -> {
+                com.example.kyoteiai.ui.kit.DelayedLoading(loading = true) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 }
             }
             state.feed == null || state.feed.venues.isEmpty() -> {
