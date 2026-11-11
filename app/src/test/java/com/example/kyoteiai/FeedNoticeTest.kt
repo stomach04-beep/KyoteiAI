@@ -42,7 +42,9 @@ class FeedNoticeTest {
     @Test fun 見本を表示中は見本の日付を書く() {
         val n = feedNotice("2026-07-08", fromRemote = false, loading = false, today = today)!!
         assertEquals("予想を取得できませんでした", n.title)
-        assertTrue(n.detail.contains("見本（7/8）"))
+        assertTrue(n.detail.contains("7/8 の見本を表示中"))
+        // 説明は2行まで（H1）
+        assertTrue(n.detail.lines().size <= 2)
         assertEquals("再試行", n.actionLabel)
     }
 
@@ -53,11 +55,23 @@ class FeedNoticeTest {
         assertEquals("再試行", n.actionLabel)
     }
 
-    @Test fun 取り直し中は題名を変えずボタンを隠す() {
+    @Test fun 取り直し中は題名を替えボタンを隠す() {
         val n = feedNotice("2026-07-08", fromRemote = false, loading = true, today = today)!!
-        assertEquals("予想を取得できませんでした", n.title)
-        assertEquals("取り直しています…", n.detail)
+        assertEquals("予想を取り直しています", n.title)
+        assertEquals("7/8 の見本を表示中です。", n.detail)
         assertNull(n.actionLabel)
+        // 何も無いときの取り直し
+        val m = feedNotice(null, fromRemote = false, loading = true, today = today)
+        assertNull(m) // 初めての読み込みと同じ扱い（印だけ）
+    }
+
+    @Test fun どの説明も2行まで() {
+        listOf(
+            feedNotice(null, false, false, today),
+            feedNotice("2026-07-08", false, false, today),
+            feedNotice("2026-11-10", true, false, today),
+            feedNotice("2026-11-10", true, true, today),
+        ).forEach { assertTrue(it!!.detail.lines().size <= 2) }
     }
 
     @Test fun 日付を短くする() {

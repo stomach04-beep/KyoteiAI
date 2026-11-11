@@ -25,7 +25,7 @@ internal data class FeedNotice(
  * - 何も取れない → 「予想を取得できませんでした」
  * - 通信できず、アプリに入っている見本を表示中（fromRemote=false）→ 見本の日付を書く（前回の値ではない）
  * - 取得はできたが日付が今日でない → 予想を作る側（PC）が止まっている。通信の失敗とは文を分ける
- * - 取り直し中は題名を変えず、説明を「取り直しています…」にしてボタンを隠す（二重に押させない）
+ * - 取り直し中は題名を「予想を取り直しています」、説明を「いま何を表示しているか」にしてボタンを隠す（二重に押させない）
  *
  * @param feedDate 表示中の予想の日付（"2026-07-08"）。予想が無ければ null
  * @param fromRemote 表示中の予想をネットから取れたか（false＝アプリに入っている見本）
@@ -38,16 +38,32 @@ internal fun feedNotice(feedDate: String?, fromRemote: Boolean, loading: Boolean
     // 初めての読み込み中（まだ何も無い）は印だけ
     if (feedDate == null && loading) return null
 
-    val (title, detail) = when {
-        feedDate == null ->
-            "予想を取得できませんでした" to "通信の状態を確かめて、もう一度試してください。"
-        !fromRemote ->
-            "予想を取得できませんでした" to "通信できないため、アプリに入っている見本（${shortDate(feedDate)}）を表示中です。"
-        else ->
-            "今日の予想がまだありません" to "${shortDate(feedDate)} の予想を表示中です。締切の表示は当てになりません。"
+    // 説明は2行まで（APP_RULES H1）。日本語はどの文字の間でも折れて「入ってい／る」のように語が割れたので
+    // （2026-11-11 見た目の点検）、1行を短くして区切りの所で改行を入れる
+    val title: String
+    val detail: String
+    val showing: String // 取り直し中にも残す「いま何を表示しているか」
+    when {
+        feedDate == null -> {
+            title = "予想を取得できませんでした"
+            detail = "通信の状態を確かめて、\nもう一度お試しください。"
+            showing = "しばらくお待ちください。"
+        }
+        !fromRemote -> {
+            title = "予想を取得できませんでした"
+            // 「見本」＝アプリに入っている固定のデータ（前回の値ではない）
+            showing = "${shortDate(feedDate)} の見本を表示中です。"
+            detail = "通信できないため、\n$showing"
+        }
+        else -> {
+            title = "今日の予想がまだありません"
+            showing = "${shortDate(feedDate)} の予想を表示中です。"
+            detail = "$showing\n締切の表示は当てになりません。"
+        }
     }
     return if (loading) {
-        FeedNotice(title, "取り直しています…", Tone.CAUTION, actionLabel = null)
+        // 取り直し中は題名も替える（「取得できませんでした」のままだと説明と食い違う・2026-11-11 見た目の点検）
+        FeedNotice("予想を取り直しています", showing, Tone.CAUTION, actionLabel = null)
     } else {
         FeedNotice(title, detail, Tone.CAUTION, actionLabel = "再試行")
     }
