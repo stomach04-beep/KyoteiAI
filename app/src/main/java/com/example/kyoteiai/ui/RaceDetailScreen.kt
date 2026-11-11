@@ -3,7 +3,6 @@ package com.example.kyoteiai.ui
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -50,12 +49,27 @@ import com.example.kyoteiai.data.BetRepository
 import com.example.kyoteiai.data.EvPolicy
 import com.example.kyoteiai.data.RacePred
 import com.example.kyoteiai.ui.kit.HeaderDivider
+import com.example.kyoteiai.ui.kit.LocalUiMessages
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+
+/**
+ * レース詳細の画面下の知らせの文（2026-11-12 v2.13 で Toast から置き換え）。
+ * 文はここ1か所だけ。デバッグ版の見本画面（debug/SnackPreviewActivity）も同じ文を使う。
+ * 帯は1行で切れるので、実機で1行に入る約18字までに収める（SM-S931Q で実測）
+ */
+object BetMessages {
+    // 投票ページを開くブラウザが無いとき（15字）
+    const val BROWSER_MISSING = "ブラウザが無く投票を開けません"
+    // 「◎を買った」を記録したとき（例「記録しました：◎1号艇 ¥100」空白込み16字。対の CANCELLED と同じです・ます調）
+    fun recorded(lane: Int, amount: Int): String = "記録しました：◎${lane}号艇 ¥$amount"
+    // 購入記録を取り消したとき（12字）
+    const val CANCELLED = "購入記録を取り消しました"
+}
 
 /**
  * レース詳細画面：6艇を勝率の高い順に並べ、各艇に確率バーを表示する。
@@ -219,6 +233,8 @@ private fun ExpectedValueSection(
     onFetch: () -> Unit
 ) {
     val context = LocalContext.current
+    // 画面下の知らせ（用意されていなければ null＝何も出さない）
+    val messages = LocalUiMessages.current
 
     Text(
         text = "期待値チェック（オッズ×AI確率）",
@@ -381,8 +397,8 @@ private fun ExpectedValueSection(
             try {
                 context.startActivity(intent)
             } catch (e: ActivityNotFoundException) {
-                // ブラウザ等が無い端末でもクラッシュさせない
-                Toast.makeText(context, "ブラウザが見つかりませんでした", Toast.LENGTH_SHORT).show()
+                // ブラウザ等が無い端末でもクラッシュさせない（知らせは画面下の帯で出す）
+                messages?.show(BetMessages.BROWSER_MISSING)
             }
         },
         modifier = Modifier.fillMaxWidth()
@@ -402,6 +418,8 @@ private fun ExpectedValueSection(
 private fun BetRecordButton(race: RacePred, dateYmd: String, pick: WinEvRow) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // 画面下の知らせ（MainActivity の Scaffold で用意。見本画面など用意されていなければ null＝何も出さない）
+    val messages = LocalUiMessages.current
 
     // 記録日付は "yyyy-MM-dd" 形式（収支の集計キーに使う）
     val dateIso = "${dateYmd.substring(0, 4)}-${dateYmd.substring(4, 6)}-${dateYmd.substring(6, 8)}"
@@ -437,11 +455,7 @@ private fun BetRecordButton(race: RacePred, dateYmd: String, pick: WinEvRow) {
                         )
                     }
                     recorded = true
-                    Toast.makeText(
-                        context,
-                        "◎${pick.lane}号艇 ¥${EvPolicy.DEFAULT_BET_AMOUNT} を記録しました",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    messages?.show(BetMessages.recorded(pick.lane, EvPolicy.DEFAULT_BET_AMOUNT))
                 }
             },
             modifier = Modifier.fillMaxWidth()
@@ -455,7 +469,7 @@ private fun BetRecordButton(race: RacePred, dateYmd: String, pick: WinEvRow) {
                         BetRepository.remove(context, dateIso, race.stadium, race.raceNo)
                     }
                     recorded = false
-                    Toast.makeText(context, "購入記録を取り消しました", Toast.LENGTH_SHORT).show()
+                    messages?.show(BetMessages.CANCELLED)
                 }
             },
             modifier = Modifier.fillMaxWidth()
