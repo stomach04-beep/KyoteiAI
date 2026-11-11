@@ -328,7 +328,8 @@ fun TextStyle.num(): TextStyle = merge(TextStyle(fontFamily = NumFont, fontFeatu
 /**
  * 主役の数字（1画面に1つだけ）。
  *  ・label … 何の数字か（14sp）
- *  ・value … 数字そのもの（36sp・太字・等幅）。単位は unit に分けると数字だけ大きくなる
+ *  ・value … 数字そのもの（36sp・太字・等幅）。単位は unit に分けると数字だけ大きくなる。
+ *            空（Fmt.EMPTY）なら「—」を24sp・普通の太さ・控えめな色で描く。空にする理由は知らせか sub で添える（APP_RULES H8）
  *  ・sub   … 補足（12sp。更新時刻・内訳など）
  *  ・tone  … 良し悪しを数字の色で示したいときだけ指定（通常は文字色のまま）
  */
@@ -365,6 +366,23 @@ fun HeroStat(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+        // 右：値が空（Fmt.EMPTY「—」）のときは小さく・細く・控えめな色で描く（APP_RULES H8）。
+        // 36sp の太字の「—」は上の知らせより目立っていた（2026-11-11 KyoteiAI v2.11 で試し利用者決定）。
+        // 行の高さ（40sp）は数字のときと同じ＝値が入っても面の高さが変わらない。単位は空の印に付けない
+        if (value == Fmt.EMPTY) {
+            Text(
+                text = value,
+                fontSize = 24.sp,
+                lineHeight = 40.sp,
+                fontWeight = FontWeight.Normal,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                // 読み上げでは「ダッシュ」でなく意味を言う
+                modifier = Modifier.semantics { contentDescription = "なし" },
+            )
+            return@Row
         }
         // 右：数字（右寄せ・1行。単位は小さく添える）
         Row(verticalAlignment = Alignment.Bottom) {
@@ -1257,7 +1275,9 @@ fun StatusNotice(
         border = androidx.compose.foundation.BorderStroke(PanelBorderWidth, fg.copy(alpha = 0.45f)),
     ) {
         Row(
-            modifier = Modifier.padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+            // 右の余白8dp（枠の付いたボタンが面の枠に貼り付いて見えないように）。
+            // 12dp にすると再試行と並ぶ題名（⚠込み14字）が2行に折れた（2026-11-11 KyoteiAI 実機）＝広げない
+            modifier = Modifier.padding(start = 14.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -1276,9 +1296,18 @@ fun StatusNotice(
                 )
             }
             if (actionLabel != null && onAction != null) {
-                // 押す所は48dp以上（TextButton の既定の高さで満たす・APP_RULES C5）
-                TextButton(onClick = onAction) {
-                    Text(actionLabel, fontWeight = FontWeight.Bold, color = fg)
+                // 画面下の知らせ（AppSnackbarHost・H6）と同じ太字＋細い枠線・両端の丸い形（2026-11-11 利用者決定）。
+                // 見た目は高さ32dp・枠は段階の色60%。押す所は Material の最小48dpが自動で確保される（APP_RULES C5）
+                TextButton(
+                    onClick = onAction,
+                    modifier = Modifier.height(32.dp),
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                    border = androidx.compose.foundation.BorderStroke(PanelBorderWidth, fg.copy(alpha = 0.60f)),
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = fg),
+                    // 左右の内側は TextButton の既定と同じ12dp（ボタンの幅を広げない＝題名を折らない）
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                ) {
+                    Text(actionLabel, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
             }
         }
