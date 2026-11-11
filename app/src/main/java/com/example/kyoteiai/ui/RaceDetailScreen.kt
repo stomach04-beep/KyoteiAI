@@ -65,8 +65,8 @@ import java.time.format.DateTimeFormatter
 object BetMessages {
     // 投票ページを開くブラウザが無いとき（15字）
     const val BROWSER_MISSING = "ブラウザが無く投票を開けません"
-    // 「◎を買った」を記録したとき（例「記録した：◎1号艇 ¥100」13字）
-    fun recorded(lane: Int, amount: Int): String = "記録した：◎${lane}号艇 ¥$amount"
+    // 「◎を買った」を記録したとき（例「記録しました：◎1号艇 ¥100」空白込み16字。対の CANCELLED と同じです・ます調）
+    fun recorded(lane: Int, amount: Int): String = "記録しました：◎${lane}号艇 ¥$amount"
     // 購入記録を取り消したとき（12字）
     const val CANCELLED = "購入記録を取り消しました"
 }

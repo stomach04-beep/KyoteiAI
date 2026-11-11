@@ -35,6 +35,8 @@ import com.example.kyoteiai.ui.theme.ThemePrefs
  * 開き方（mode = light / dark、style = new / old、msg = browser / recorded / cancelled）:
  *   adb shell am start --activity-clear-task -n com.example.kyoteiai/.debug.SnackPreviewActivity --es mode light --es style new --es msg recorded
  * style = old は v2.12 までの Toast を本物のまま出す（約3.5秒で消えるので、開いてすぐ撮る）。
+ * 画面の中のボタンは押さない（後ろは本物のレース詳細なので「オッズ取得」は通信し、「投票へ」はクリップボードを書き換えてブラウザを開き、
+ * 取得の後の「買った」は本物の購入記録に書き込む）。
  * 注意：撮影を am start -S や am force-stop で終えない（停止状態になり予約が消える）。終わったら本物の画面を1回開く
  */
 class SnackPreviewActivity : ComponentActivity() {
